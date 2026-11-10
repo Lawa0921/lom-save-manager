@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>LoMSaveManager</AssemblyName>
+    <RootNamespace>LoMSaveManager</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Core is compiled into this assembly as source so the plugin ships as a single DLL. -->
+    <Compile Include="..\Core\*.cs" LinkBase="Core" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="BepInEx.Core"><HintPath>$(GameDir)\BepInEx\core\BepInEx.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx.Unity.Mono"><HintPath>$(GameDir)\BepInEx\core\BepInEx.Unity.Mono.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(GameDir)\BepInEx\core\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Mortal.Core"><HintPath>$(GameDir)\Mortal_Data\Managed\Mortal.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(GameDir)\Mortal_Data\Managed\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameDir)\Mortal_Data\Managed\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(GameDir)\Mortal_Data\Managed\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(GameDir)\Mortal_Data\Managed\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(GameDir)\Mortal_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <!-- The game's own input (Keyboard.current): the naming dialog reads Enter from it. -->
+    <Reference Include="Unity.InputSystem"><HintPath>$(GameDir)\Mortal_Data\Managed\Unity.InputSystem.dll</HintPath><Private>false</Private></Reference>
+    <!-- InputField lives here; the naming dialog needs it. -->
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(GameDir)\Mortal_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
