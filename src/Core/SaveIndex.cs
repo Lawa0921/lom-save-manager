@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.Serialization;
 
 namespace LoMSaveManager
@@ -62,23 +64,60 @@ namespace LoMSaveManager
             }
         }
 
-        /// <summary>Repairs explicit nulls ("Slots":null, null list entries) that a hand-edited or damaged file can contain.</summary>
+        /// <summary>
+        /// Makes loaded data obey the same rules the UI enforces, because the file may have been hand-edited, damaged, or
+        /// written elsewhere and synced: explicit nulls are dropped; categories without an id or with a repeated id are
+        /// dropped (the first wins); at most <see cref="SaveCatalog.MaxCategories"/> categories are kept (lowest Order
+        /// first); category names are trimmed and cut to <see cref="SaveCatalog.MaxCategoryNameLength"/>; slot records whose
+        /// key is not a manual slot are dropped; slot names are trimmed (blank means none) and cut to
+        /// <see cref="SaveCatalog.MaxSlotNameLength"/>. Data that already obeys the rules is left exactly as it is.
+        /// This only changes the object in memory; it never writes the file.
+        /// </summary>
         internal void Normalize()
         {
             if (Categories == null) Categories = new List<CategoryRecord>();
-            else Categories.RemoveAll(c => c == null);
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+            Categories.RemoveAll(c => c == null || string.IsNullOrEmpty(c.Id) || !seenIds.Add(c.Id));
+            if (Categories.Count > SaveCatalog.MaxCategories)
+            {
+                // OrderBy is stable, so equal Orders keep their list order, as the catalog shows them.
+                var kept = new HashSet<CategoryRecord>(Categories.OrderBy(c => c.Order).Take(SaveCatalog.MaxCategories));
+                Categories.RemoveAll(c => !kept.Contains(c));
+            }
+            foreach (var category in Categories)
+                category.Name = Cut(category.Name == null ? string.Empty : category.Name.Trim(), SaveCatalog.MaxCategoryNameLength);
 
             if (Slots == null)
             {
                 Slots = new Dictionary<string, SlotRecord>();
+                return;
             }
-            else
+
+            var dropped = new List<string>();
+            foreach (var pair in Slots)
             {
-                var nullKeys = new List<string>();
-                foreach (var pair in Slots)
-                    if (pair.Value == null) nullKeys.Add(pair.Key);
-                foreach (var key in nullKeys) Slots.Remove(key);
+                if (pair.Value == null || !SlotKey.IsManual(pair.Key))
+                {
+                    dropped.Add(pair.Key);
+                    continue;
+                }
+                var name = pair.Value.Name;
+                if (name == null) continue;
+                var clean = name.Trim();
+                // Only touch a name that breaks a rule, so a valid record stays byte-for-byte the same.
+                if (clean.Length == 0) pair.Value.Name = name.Length == 0 ? name : null;
+                else if (clean.Length != name.Length || clean.Length > SaveCatalog.MaxSlotNameLength)
+                    pair.Value.Name = Cut(clean, SaveCatalog.MaxSlotNameLength);
             }
+            foreach (var key in dropped) Slots.Remove(key);
+        }
+
+        /// <summary>The first <paramref name="max"/> UTF-16 units of <paramref name="text"/>, never splitting a surrogate pair.</summary>
+        private static string Cut(string text, int max)
+        {
+            if (text.Length <= max) return text;
+            var length = char.IsHighSurrogate(text[max - 1]) ? max - 1 : max;
+            return text.Substring(0, length);
         }
     }
 

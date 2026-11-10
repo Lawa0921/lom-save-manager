@@ -272,7 +272,7 @@ namespace LoMSaveManager
 
         /// <summary>
         /// Before OnPanelOpen's own body (which selects row 0 and calls UpdateSlot): the sidebar selects the category of
-        /// the save being played (design frame 03), then the list is rebuilt.
+        /// the save being played, then the list is rebuilt.
         /// </summary>
         private static void SaveOnPanelOpen(SaveGamePanel __instance)
         {
@@ -298,20 +298,30 @@ namespace LoMSaveManager
         /// </summary>
         private static Exception SaveOnPanelOpenEnd(SaveGamePanel __instance, Exception __exception)
         {
-            var deferred = Deferred.Remove(__instance);
-            if (__exception is IndexOutOfRangeException && SaveManagerRuntime.Current.Enabled && SlotListBuilder.Count(__instance) == 0)
-                __exception = null;
-            if (__exception != null || !deferred) return __exception;
+            var original = __exception;
             try
             {
-                var ui = __instance.GetComponent<ManagedPanel>();
-                if (ui != null) ui.SelectInitial();
+                var deferred = Deferred.Remove(__instance);
+                if (__exception is IndexOutOfRangeException && SaveManagerRuntime.Current.Enabled && SlotListBuilder.Count(__instance) == 0)
+                    __exception = null;
+                if (__exception != null || !deferred) return __exception;
+                try
+                {
+                    var ui = __instance.GetComponent<ManagedPanel>();
+                    if (ui != null) ui.SelectInitial();
+                }
+                catch (Exception ex)
+                {
+                    SaveManagerPlugin.LogWarn("Selecting the first row failed: " + ex.Message);
+                }
+                return null;
             }
             catch (Exception ex)
             {
-                SaveManagerPlugin.LogWarn("Selecting the first row failed: " + ex.Message);
+                // A finalizer must never replace the game's own outcome with an exception of ours.
+                SaveManagerPlugin.LogWarn("Finishing the save panel failed (" + ex.GetType().Name + ": " + ex.Message + ")");
+                return original;
             }
-            return null;
         }
 
         private static void SaveDefer(SaveGamePanel __instance)

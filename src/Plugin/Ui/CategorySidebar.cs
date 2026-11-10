@@ -9,7 +9,7 @@ using Object = UnityEngine.Object;
 namespace LoMSaveManager
 {
     /// <summary>
-    /// The left column of the load/save panel (approved design, frames 01/07): 最近存檔, 自動存檔, the user's categories
+    /// The left column of the load/save panel: 最近存檔, 自動存檔, the user's categories
     /// (scrolling when there are many), 未分類, then 「＋ 新增分類」 and 「管理分類」. Rows are copies of the game's own slot
     /// row (Normal/Hover texts, green Focus strip for the selected category); buttons are copies of the 刪除 button.
     /// In manage mode every user category gets ▲ ▼ 改名 刪除 and the fixed rows are dimmed.
@@ -17,7 +17,7 @@ namespace LoMSaveManager
     /// </summary>
     internal sealed class CategorySidebar
     {
-        // Canvas layout of the column (mockup .col-l at 307,262; .catlist top 76).
+        // Canvas layout of the column (left edge at 307,262; the category list starts 76 below that).
         private const float ColumnX = 307f;
         private const float ListY = 338f;
         private const float RowW = 500f;
@@ -126,7 +126,7 @@ namespace LoMSaveManager
                 row.Root.name = "LSM.Cat." + category.Id;
                 row.Root.SetActive(true);
                 UiClone.PlaceTL(row.Rect, 0f, i * RowStep, RowW, RowH);
-                row.Show(category.Name, category.Count.ToString(), controller.Selected == category.Id);
+                row.Show(DisplayText.Plain(category.Name), category.Count.ToString(), controller.Selected == category.Id);
                 row.SetUsable(true, false);
                 row.SetManage(manage, _owner, controller.CanMoveUp(category.Id), controller.CanMoveDown(category.Id));
             }
@@ -139,7 +139,7 @@ namespace LoMSaveManager
             var noneY = 144f + (visible == 0 ? 0f : listHeight + 12f);
             UiClone.PlaceTL(_none.Rect, 0f, noneY, RowW, RowH);
 
-            // Bottom buttons sit at a fixed height (mockup .cact); the manage hint just above them.
+            // Bottom buttons sit at a fixed height; the manage hint just above them.
             var buttonsTop = ButtonsY - ListY;
             UiClone.SetTexts(_add.gameObject, _owner.S("Category.Add"));
             UiClone.SizeFramedButton(_add, 4f, buttonsTop, 176f, 50f, 24f);
@@ -252,7 +252,7 @@ namespace LoMSaveManager
             return row;
         }
 
-        // "我的分類" is drawn with wide letter spacing in the design.
+        // "我的分類" is drawn with wide letter spacing.
         private static string Spaced(string text)
         {
             return string.Join(" ", text.Select(c => c.ToString()).ToArray());
@@ -355,7 +355,7 @@ namespace LoMSaveManager
             if (_focus != null) _focus.SetActive(selected);
         }
 
-        /// <summary>Usable rows can be chosen; in manage mode the fixed rows are dimmed (design frame 07).</summary>
+        /// <summary>Usable rows can be chosen; in manage mode the fixed rows are dimmed.</summary>
         public void SetUsable(bool usable, bool dim)
         {
             Button.interactable = usable;

@@ -63,14 +63,14 @@ namespace LoMSaveManager
     }
 
     /// <summary>
-    /// Turns the game's slot rows into the approved design (frames 01/03/10): the save's name replaces the in-game date
+    /// Turns the game's slot rows into the save manager's layout: the save's name replaces the in-game date
     /// in the big line (「（未命名）」 in grey when it has none), the date moves to the small line beside the real time,
     /// and 命名 / 移動 / 刪除 (74x46 copies of the game's 刪除 frame) sit right of the row. The game's 傳奇NNN header,
     /// NG+ star and green Focus strip stay as the game set them. Rows are reused, so every call fully restyles the row.
     /// </summary>
     internal static class SlotDecorator
     {
-        // Row-relative positions (the row is the game's 470x100 slot; the design's column starts 15px further left).
+        // Row-relative positions (the row is the game's 470x100 slot; the list column starts 15px further left).
         private const float ButtonsY = 20f;
         private const float RenameX = 467f;
         private const float MoveX = 547f;
@@ -100,7 +100,7 @@ namespace LoMSaveManager
                 {
                     var label = kind == RowKind.NewGame
                         ? owner.S("Slot.NewGame")
-                        : string.Format(owner.S("Slot.NewInCategory"), owner.CategoryDisplayName);
+                        : string.Format(owner.S("Slot.NewInCategory"), DisplayText.Plain(owner.CategoryDisplayName));
                     var sub = owner.S(kind == RowKind.NewGame ? "Slot.NewGame.Sub" : "Slot.NewInCategory.Sub");
                     if (row.Header != null) row.Header.gameObject.SetActive(false);
                     if (row.Star != null) row.Star.SetActive(false);
@@ -141,9 +141,9 @@ namespace LoMSaveManager
                     var time = state.NativeTime;
                     for (var i = 0; i < row.Titles.Length; i++)
                     {
-                        row.Titles[i].text = name ?? owner.S("Slot.Unnamed");
+                        row.Titles[i].text = DisplayText.Plain(name) ?? owner.S("Slot.Unnamed");
                         if (name != null) continue;
-                        // Unnamed: smaller and grey (design .ttl.unnamed); the hover copy stays bright.
+                        // Unnamed: smaller and grey; the hover copy stays bright.
                         row.Titles[i].resizeTextMaxSize = 30;
                         if (i == 0) row.Titles[i].color = UiClone.Dim;
                     }

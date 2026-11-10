@@ -9,7 +9,7 @@ namespace LoMSaveManager
     /// <summary>
     /// Text entry in a copy of the game's confirm window (the game has no input field of its own): a uGUI InputField made
     /// at run time with the window's SourceHanSerifTC-Bold font, a frame from the window's own panel sprite, a counter,
-    /// and a hint or a red validation error under it (design frames 05/06).
+    /// and a hint or a red validation error under it.
     /// Used for naming a save (after saving: 「略過」 instead of 「取消」), creating and renaming a category.
     /// While the field has focus every hotkey button is paused (Enter/Esc belong to the field, and an IME uses Enter to
     /// commit); Enter in the field confirms, Esc cancels.
@@ -232,7 +232,7 @@ namespace LoMSaveManager
                 Submit();
                 return;
             }
-            // Focus left the field another way (mouse, test driver): the next stop is 確定.
+            // Focus left the field another way (mouse, or code selecting another object): the next stop is 確定.
             var events = EventSystem.current;
             if (events != null && (events.currentSelectedGameObject == null || events.currentSelectedGameObject == _field.gameObject))
                 SelectRelay.SelectQuietly(Ok.gameObject);

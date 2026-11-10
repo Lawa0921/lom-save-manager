@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace LoMSaveManager
 {
     /// <summary>
-    /// When keyboard/gamepad focus on a sidebar category turns into selecting it. The approved design wants the right
+    /// When keyboard/gamepad focus on a sidebar category turns into selecting it. The intent is for the right
     /// column to follow ↑↓ in the sidebar "like tabs", but showing a category rebuilds its list, and every row reads its
     /// save file through the game's Setup() — too slow to repeat for every category the cursor passes over. So focus
     /// only switches once the cursor has rested on one category for <see cref="DefaultSeconds"/> (unscaled time);

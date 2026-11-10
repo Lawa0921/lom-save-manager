@@ -39,7 +39,7 @@
   - `GetLegendDataFile(int slot)` → `<user>/Legend_<slot.PadLeft(3)>.dat`。這是「結局傳奇」紀錄，給講經堂和結局面板用，**跟一般存檔槽無關**。
   - `GetBackupDataFile(name)` → `persistentDataPath/Backup/yyyyMMddHHmmss/Save_<name>.dat`（**不在** SteamID 子目錄裡），只有 `BackupLibraryData()` 用來備份 universe。
 - 實際目錄內容（唯讀列出）：`Save_001..020.dat`（69–127 KB）、`Save_auto*.dat`、`Save_universe.dat`（1.19 MB）加 `Save_universe.json`（1.5 MB）、`Legend_001..012.dat`、`steam_autocloud.vdf`。
-  有 `steam_autocloud.vdf` 代表開了 Steam Auto-Cloud。同步哪些檔名是 Steamworks 後台的設定，下面是**已確認（2026-11-09 在開發機上實測，對照 Steam 的 `remotecache.vdf`）**的結果：
+  有 `steam_autocloud.vdf` 代表開了 Steam Auto-Cloud。同步哪些檔名是 Steamworks 後台的設定，下面是**已確認（2026-11-09 作者實測，對照 Steam 的 `remotecache.vdf`）**的結果：
   - **`Save_021+.dat` 會上雲。** `remotecache.vdf` 出現 `Save_021.dat`（size 92377，syncstate 1）和 `Save_022.dat`（size 115361，syncstate 1）。本機在遊戲關閉時刪掉後，下次啟動被 Steam 重新下載。
   - **在遊戲執行中刪除才會同步刪除。** remotecache 的 ChangeNumber 從 264 變成 265，條目從 39 變成 37。
   - **（v1 位置）`LoMSaveManager/index.json`（子資料夾）在觀察中沒有上雲。** 有效的觀察只有一次：當時本機確實有 `LoMSaveManager/index.json`，但 remotecache 快照沒有它的條目。這是目前後台設定下的觀察結果，不是保證，開發商改設定的話可能會變。

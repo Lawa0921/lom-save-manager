@@ -106,7 +106,7 @@ namespace LoMSaveManager.Tests
             {
                 var existing = new HashSet<string> { "001" };
                 var none = new HashSet<string>();
-                // 「＋ 存到…」 writes a new slot (nothing is lost), so the save panel keeps the design's first row.
+                // 「＋ 存到…」 writes a new slot (nothing is lost), so the save panel keeps its first row.
                 Check.Equal(0, FocusRules.InitialRow(false, new[] { "002", "001" }, existing, none));
                 Check.Equal(0, FocusRules.InitialRow(false, new[] { "002" }, existing, none));
                 Check.Equal(-1, FocusRules.InitialRow(false, new string[0], existing, none));

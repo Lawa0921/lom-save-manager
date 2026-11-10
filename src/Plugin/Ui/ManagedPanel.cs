@@ -12,7 +12,7 @@ namespace LoMSaveManager
 {
     /// <summary>
     /// The save manager's layer on one game load or save panel (attached to the panel's GameObject): it rearranges the
-    /// panel into the approved two-column design (category sidebar left, the category's saves right), owns the
+    /// panel into a two-column layout (category sidebar left, the category's saves right), owns the
     /// panel's <see cref="CategoryController"/>, and runs the naming / moving / category dialogs. The game's own
     /// methods still load, save and delete; this only decides which rows the panel shows and decorates them.
     /// Built lazily the first time the panel is customized; if building fails the panel stays the game's own.
@@ -24,7 +24,7 @@ namespace LoMSaveManager
         private static readonly HashSet<int> FailedPanels = new HashSet<int>();
         private static readonly List<ManagedPanel> Live = new List<ManagedPanel>();
 
-        // Right column (canvas units, design .col-r at 905,262).
+        // Right column (canvas units, left edge at 905,262).
         private const float RightX = 905f;
         private const float RightTitleX = 919f;
         private const float RightTitleY = 262f;
@@ -378,13 +378,13 @@ namespace LoMSaveManager
 
                 _leftTitle.text = S("Category.Header");
                 var saveCount = listing.Keys.Count;
-                _rightTitle.text = CategoryDisplayName;
+                _rightTitle.text = DisplayText.Plain(CategoryDisplayName);
                 var titleWidth = Mathf.Min(_rightTitle.preferredWidth, 420f);
                 UiClone.PlaceCanvas((RectTransform)_rightTitle.transform, RightTitleX, RightTitleY, 420f, 66f);
                 _rightCount.gameObject.SetActive(Controller.ShowsSlotList);
                 _rightCount.text = string.Format(S("Category.Count"), saveCount);
                 UiClone.PlaceCanvas((RectTransform)_rightCount.transform, RightTitleX + titleWidth + 18f, RightTitleY + 14f, 160f, 44f);
-                // An empty category has nothing to sort (design frame 10).
+                // An empty category has nothing to sort.
                 _sort.gameObject.SetActive(Controller.ShowsSlotList && saveCount > 0);
                 UiClone.SetTexts(_sort.gameObject, S(Controller.NewestFirst ? "Sort.NewestFirst" : "Sort.OldestFirst"));
 
@@ -548,7 +548,7 @@ namespace LoMSaveManager
         }
 
         /// <summary>
-        /// The right-column stop the cursor starts on (design: 鍵盤／手把, "游標先落在右欄第一列"), except that on the
+        /// The right-column stop the cursor starts on (keyboard/gamepad: the cursor starts on the first row of the right column), except that on the
         /// load panel it is the first real save, not 「＋ 開始新的旅程」 (one click there starts a new game and loses
         /// unsaved progress; it stays one up-press away). Null when the list has no such row. See <see cref="FocusRules"/>.
         /// </summary>
@@ -745,7 +745,7 @@ namespace LoMSaveManager
         {
             var category = Controller.Catalog.UserCategories().FirstOrDefault(c => c.Id == id);
             if (category == null) return;
-            _confirm.Show("category_delete", () => string.Format(S("Category.ConfirmDelete"), category.Name, category.Count), () =>
+            _confirm.Show("category_delete", () => string.Format(S("Category.ConfirmDelete"), DisplayText.Plain(category.Name), category.Count), () =>
             {
                 Controller.Delete(id);
                 var first = Controller.Catalog.UserCategories().FirstOrDefault();
@@ -790,7 +790,7 @@ namespace LoMSaveManager
                     SelectKey(key);
                     return;
                 }
-                ShowToast(string.Format(S("Toast.Moved"), DisplayName(target)));
+                ShowToast(string.Format(S("Toast.Moved"), DisplayText.Plain(DisplayName(target))));
                 if (IndexOfKey(key) >= 0) SelectKey(key);
                 else SelectAfterRemoval(oldIndex);
             });
@@ -829,7 +829,7 @@ namespace LoMSaveManager
             var row = index >= 0 && index < _rows.Count ? _rows[index] : null;
             var header = row != null && row.Header != null ? row.Header.text : key;
             var gold = "<color=#" + ColorUtility.ToHtmlStringRGB(UiClone.Gold) + ">" + header + "</color>";
-            if (!withTime) return gold + "　" + (Controller.Catalog.NameOf(key) ?? S("Slot.Unnamed"));
+            if (!withTime) return gold + "　" + (DisplayText.Plain(Controller.Catalog.NameOf(key)) ?? S("Slot.Unnamed"));
             var state = row == null ? null : row.Root.GetComponent<SlotDecorator.RowState>();
             if (state == null) return gold;
             return gold + "　" + state.NativeTitle + "　" + state.NativeTime;

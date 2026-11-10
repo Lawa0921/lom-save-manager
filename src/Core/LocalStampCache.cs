@@ -15,6 +15,11 @@ namespace LoMSaveManager
     {
         public const int CurrentVersion = 1;
 
+        /// <summary>
+        /// Larger caches are ignored (and rewritten). About 130 bytes per save, so even all 9999 slots fit well below this.
+        /// </summary>
+        public const int MaxFileBytes = 4 * 1024 * 1024;
+
         private readonly string _path;
         private readonly Dictionary<string, LocalCacheEntry> _entries = new Dictionary<string, LocalCacheEntry>(StringComparer.Ordinal);
         private bool _dirty;
@@ -110,12 +115,19 @@ namespace LoMSaveManager
             try
             {
                 if (!File.Exists(_path)) return;
-                bytes = File.ReadAllBytes(_path);
+                bytes = JsonFile.ReadAllBytesUpTo(_path, MaxFileBytes);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 LoadProblem = Path.GetFileName(_path) + " could not be read (" + ex.Message + "); hashing every save again";
                 _dirty = true;
+                return;
+            }
+
+            if (bytes == null)
+            {
+                LoadProblem = Path.GetFileName(_path) + " is larger than " + JsonFile.Megabytes(MaxFileBytes) + " and was ignored; hashing every save again";
+                _dirty = true; // replaced by a fresh cache on the next Save
                 return;
             }
 

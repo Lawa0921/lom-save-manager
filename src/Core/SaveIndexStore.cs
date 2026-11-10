@@ -9,11 +9,18 @@ namespace LoMSaveManager
     /// <summary>
     /// Reads and writes the metadata file. Load never throws for a bad file: it quarantines it
     /// (&lt;name&gt;.corrupt-&lt;UTC ticks&gt; in the work directory) and starts empty, so the game itself is never affected.
-    /// A file from a newer version is left exactly as it is and never overwritten by this store.
+    /// A file from a newer version, or one larger than <see cref="MaxFileBytes"/>, is left exactly as it is and never overwritten
+    /// by this store (moving it aside would propagate a delete through Steam Cloud).
     /// The temp file of an atomic write also lives in the work directory, so the synced folder only ever holds the file itself.
     /// </summary>
     public sealed class SaveIndexStore
     {
+        /// <summary>
+        /// Larger files are not read at all. A real index stays far below this (about 200 bytes per named save; Steam Cloud's
+        /// quota holds roughly a thousand saves), so a bigger file is damaged or hostile, and parsing it could stall the game.
+        /// </summary>
+        public const int MaxFileBytes = 1024 * 1024;
+
         private readonly string _path;
         private readonly string _workDirectory;
         private readonly string _fileName;
@@ -52,7 +59,7 @@ namespace LoMSaveManager
             try
             {
                 if (!File.Exists(_path)) return new SaveIndex();
-                bytes = File.ReadAllBytes(_path);
+                bytes = JsonFile.ReadAllBytesUpTo(_path, MaxFileBytes);
             }
             catch (FileNotFoundException) { return new SaveIndex(); }
             catch (DirectoryNotFoundException) { return new SaveIndex(); }
@@ -60,6 +67,15 @@ namespace LoMSaveManager
             {
                 // Locked or unreadable: leave the file alone (it may be fine) and run without metadata.
                 LastLoadProblem = _fileName + " could not be read: " + ex.Message;
+                CanSave = false;
+                return new SaveIndex();
+            }
+
+            if (bytes == null)
+            {
+                // Not quarantined: moving the synced file would delete it from Steam Cloud and every other machine.
+                LastLoadProblem = _fileName + " is larger than " + JsonFile.Megabytes(MaxFileBytes) + " and was not read; left untouched, "
+                    + "names and categories are not shown or saved this session (check the file, or move it away to start fresh)";
                 CanSave = false;
                 return new SaveIndex();
             }
@@ -128,7 +144,9 @@ namespace LoMSaveManager
         {
             try
             {
-                return File.Exists(_path) && File.ReadAllBytes(_path).SequenceEqual(bytes);
+                var existing = new FileInfo(_path);
+                if (!existing.Exists || existing.Length != bytes.Length) return false;
+                return File.ReadAllBytes(_path).SequenceEqual(bytes);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
@@ -235,6 +253,37 @@ namespace LoMSaveManager
 
             if (value == null) problem = fileName + " is corrupt (no object)";
             return value;
+        }
+
+        /// <summary>
+        /// The file's bytes, or null when it is longer than <paramref name="maxBytes"/> (then nothing is read).
+        /// Throws like <see cref="File.ReadAllBytes"/> when it is missing or unreadable.
+        /// </summary>
+        public static byte[] ReadAllBytesUpTo(string path, int maxBytes)
+        {
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                var length = stream.Length;
+                if (length > maxBytes) return null;
+                var bytes = new byte[length];
+                var read = 0;
+                while (read < bytes.Length)
+                {
+                    var n = stream.Read(bytes, read, bytes.Length - read);
+                    if (n == 0) break;
+                    read += n;
+                }
+                if (read == bytes.Length) return bytes;
+                var shorter = new byte[read];
+                Array.Copy(bytes, shorter, read);
+                return shorter;
+            }
+        }
+
+        /// <summary>"1 MB" for 1048576: limits as the log states them.</summary>
+        public static string Megabytes(int bytes)
+        {
+            return (bytes / (1024 * 1024)) + " MB";
         }
 
         public static byte[] Write<T>(T value)

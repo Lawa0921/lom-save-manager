@@ -117,16 +117,20 @@ namespace LoMSaveManager
             var session = new SaveSession(userFolder, store, index, cache, warn);
             session.Migration = migration;
             session._migrationPending = migrationPending;
+            var changed = false;
             try
             {
-                session.Catalog.Reconcile(session.ScanManualSaves());
+                changed = session.Catalog.Reconcile(session.ScanManualSaves());
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 // Better to keep every record than to judge them against half a listing; the next save reconciles again.
                 warn("could not list the save folder: " + ex.Message);
             }
-            session.Persist();
+            // Write only when a record really went stale. Loading alone (the limits applied by SaveIndex.Normalize, or a
+            // file formatted differently) must not rewrite the synced file: the first real edit does. Persist still runs
+            // on a read-only session, to say once why nothing will be saved.
+            if (changed || !session.CanPersist) session.Persist();
             return session;
         }
 

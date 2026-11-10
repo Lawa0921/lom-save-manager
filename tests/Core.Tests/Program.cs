@@ -25,6 +25,7 @@ namespace LoMSaveManager.Tests
             LocalStampCacheTests.Run(Test);
             CloudSyncTests.Run(Test);
             MetadataMigrationTests.Run(Test);
+            HardeningTests.Run(Test);
 
             Console.WriteLine(_count - _failures + " passed, " + _failures + " failed");
             return _failures == 0 ? 0 : 1;

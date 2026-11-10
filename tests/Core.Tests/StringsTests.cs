@@ -11,7 +11,7 @@ namespace LoMSaveManager.Tests
         private const string Traditional = "ChineseTraditional";
         private const string Simplified = "ChineseSimplified";
 
-        // Every key of the approved UI copy table ("文案表", mirrored by Strings.Entries), except the five validation
+        // Every key of the approved UI copy table, except the five validation
         // errors: those are the SaveCatalog.ErrorKeys values and have their own test.
         private static readonly string[] ApprovedKeys =
         {
@@ -30,7 +30,7 @@ namespace LoMSaveManager.Tests
             "Error.Disabled",
         };
 
-        // Keys the approved design removed. Name.Title.Category became Name.Title.CategoryNew / Name.Title.CategoryRename.
+        // Keys removed from the UI copy. Name.Title.Category became Name.Title.CategoryNew / Name.Title.CategoryRename.
         private static readonly string[] DroppedKeys = { "Name.Title.Category" };
 
         // How many {n} arguments each template takes. Every key not listed here takes none.

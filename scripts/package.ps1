@@ -96,7 +96,8 @@ finally {
 }
 
 $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath $hashPath -Value "$hash *$(Split-Path -Leaf $zipPath)" -Encoding Ascii
+# sha256sum format with an LF line ending (Set-Content would write CRLF, which `sha256sum -c` reports as part of the name).
+[System.IO.File]::WriteAllText($hashPath, "$hash *$(Split-Path -Leaf $zipPath)`n", [System.Text.Encoding]::ASCII)
 
 Write-Host ''
 Write-Host "Packaged LoMSaveManager $version"

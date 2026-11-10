@@ -93,13 +93,19 @@ namespace LoMSaveManager
             byte[] bytes;
             try
             {
-                bytes = File.ReadAllBytes(legacyPath);
+                bytes = JsonFile.ReadAllBytesUpTo(legacyPath, SaveIndexStore.MaxFileBytes);
             }
             catch (FileNotFoundException) { return NothingToDo; }
             catch (DirectoryNotFoundException) { return NothingToDo; }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 return Failed(SaveSession.LegacyIndexFileName + " could not be read: " + ex.Message);
+            }
+            if (bytes == null)
+            {
+                // Left in place like an unreadable file (the session stays read-only), not moved aside: it may be fine.
+                return Failed(SaveSession.LegacyIndexFileName + " is larger than " + JsonFile.Megabytes(SaveIndexStore.MaxFileBytes)
+                    + " and was not read; left untouched");
             }
 
             string problem;
@@ -167,6 +173,8 @@ namespace LoMSaveManager
             }
 
             if (File.Exists(syncPath)) return LegacyIgnored;
+            // The same limits a load applies, so the file written here is not changed again by the next start.
+            index.Normalize();
             // Nothing to carry over (v1 wrote index.json even when nothing was named): creating an empty synced file
             // could win a Steam Cloud conflict against a populated one, so leave it to the first edit.
             var writeSynced = !index.IsEmpty;
@@ -215,7 +223,9 @@ namespace LoMSaveManager
             try
             {
                 string problem;
-                var legacy = JsonFile.TryRead<LegacyIndexV1>(File.ReadAllBytes(legacyPath), SaveSession.LegacyIndexFileName, out problem);
+                var bytes = JsonFile.ReadAllBytesUpTo(legacyPath, SaveIndexStore.MaxFileBytes);
+                if (bytes == null) return true; // not read, so it cannot be ruled out
+                var legacy = JsonFile.TryRead<LegacyIndexV1>(bytes, SaveSession.LegacyIndexFileName, out problem);
                 if (legacy == null || legacy.Version != 1) return true;
                 legacy.Normalize();
                 if (legacy.Categories.Count > 0 || !legacy.NewestFirst) return true;

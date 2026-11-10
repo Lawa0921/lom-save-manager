@@ -15,8 +15,8 @@ namespace LoMSaveManager
 
         public const string ChineseSimplified = "ChineseSimplified";
 
-        // Key, Traditional, Simplified. This is the approved UI copy (the design's copy table, "文案表"), in the
-        // same order. Texts with {0}, {1} are string.Format templates; the caller supplies the arguments.
+        // Key, Traditional, Simplified. This is the approved UI copy table, in its
+        // original order. Texts with {0}, {1} are string.Format templates; the caller supplies the arguments.
         // The numbers in the three *TooLong / *Limit messages repeat SaveCatalog's limits (a test checks they agree).
         private static readonly string[][] Entries =
         {

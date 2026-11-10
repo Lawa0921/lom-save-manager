@@ -7,7 +7,7 @@ using UnityEngine.UI;
 namespace LoMSaveManager
 {
     /// <summary>
-    /// 「移到哪個分類？」 (design frame 09): the user categories and 未分類 as category-style rows in a copy of the game's
+    /// 「移到哪個分類？」: the user categories and 未分類 as category-style rows in a copy of the game's
     /// confirm window; the save's current category is marked 目前所在 and cannot be chosen; 取消 closes.
     /// Choosing a row moves the save at once.
     /// </summary>
@@ -71,7 +71,7 @@ namespace LoMSaveManager
             _title.text = Owner.S("Move.Title");
             _context.text = context ?? "";
 
-            var targets = categories.Select(c => new KeyValuePair<string, string>(c.Id, c.Name)).ToList();
+            var targets = categories.Select(c => new KeyValuePair<string, string>(c.Id, DisplayText.Plain(c.Name))).ToList();
             targets.Add(new KeyValuePair<string, string>(CategoryController.Uncategorized, Owner.S("Category.Uncategorized")));
             while (_options.Count < targets.Count)
             {
@@ -120,7 +120,7 @@ namespace LoMSaveManager
             if (!IsOpen) return;
             _title.text = Owner.S("Move.Title");
             SetLabel(CancelTexts, Owner.S("Name.Cancel"));
-            var names = Owner.Controller.Catalog.UserCategories().ToDictionary(c => c.Id, c => c.Name);
+            var names = Owner.Controller.Catalog.UserCategories().ToDictionary(c => c.Id, c => DisplayText.Plain(c.Name));
             foreach (var row in _options)
             {
                 if (!row.Root.activeSelf) continue;

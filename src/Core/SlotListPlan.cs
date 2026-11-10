@@ -82,7 +82,7 @@ namespace LoMSaveManager
         }
 
         /// <summary>
-        /// Whether the save panel's first row is the disabled 「存檔數已達上限」 hint (design frame 11): a save panel that
+        /// Whether the save panel's first row is the disabled 「存檔數已達上限」 hint: a save panel that
         /// lists slots and has no free key left (every slot 001..9999 is taken). Overwriting still works.
         /// </summary>
         public static bool ShowsFullHint(bool isSavePanel, bool showsSlotList, string newSlotKeyOrNull)
