@@ -19,16 +19,41 @@ namespace LoMSaveManager
         public const string Auto = "@auto";
         public const string Uncategorized = "@none";
 
+        /// <summary>
+        /// The <see cref="ArgumentException.Message"/> (and <see cref="Strings"/> key) of every edit refused because
+        /// this session cannot save names and categories (see <see cref="CanEdit"/>).
+        /// </summary>
+        public const string ReadOnlyErrorKey = "Error.ReadOnly";
+
         private readonly SaveCatalog _catalog;
         private readonly Action _persist;
+        private readonly Func<bool> _canEdit;
 
         public CategoryController(SaveCatalog catalog, Action persist)
+            : this(catalog, persist, () => true)
+        {
+        }
+
+        /// <param name="canEdit">Whether edits can be saved right now (the session's <see cref="SaveSession.CanPersist"/>).</param>
+        public CategoryController(SaveCatalog catalog, Action persist, Func<bool> canEdit)
         {
             if (catalog == null) throw new ArgumentNullException(nameof(catalog));
             if (persist == null) throw new ArgumentNullException(nameof(persist));
+            if (canEdit == null) throw new ArgumentNullException(nameof(canEdit));
             _catalog = catalog;
             _persist = persist;
+            _canEdit = canEdit;
             Selected = Recent;
+        }
+
+        /// <summary>
+        /// False while names and categories cannot be saved this session (the file is from a newer version, unreadable
+        /// or too large, a v1 migration is pending, ...). Every edit is then refused before it changes anything, with
+        /// <see cref="ReadOnlyErrorKey"/>, so nothing is shown that would vanish at the next start; browsing still works.
+        /// </summary>
+        public bool CanEdit
+        {
+            get { return _canEdit(); }
         }
 
         /// <summary>Raised after every change of the selection or of the catalog made through this controller.</summary>
@@ -95,6 +120,7 @@ namespace LoMSaveManager
 
         public string Create(string name)
         {
+            RequireEditable();
             var id = _catalog.CreateCategory(name);
             Commit();
             return id;
@@ -103,6 +129,7 @@ namespace LoMSaveManager
         public void Rename(string id, string name)
         {
             RequireUser(id, "renamed");
+            RequireEditable();
             _catalog.RenameCategory(id, name);
             Commit();
         }
@@ -111,6 +138,7 @@ namespace LoMSaveManager
         public void Delete(string id)
         {
             RequireUser(id, "deleted");
+            RequireEditable();
             _catalog.DeleteCategory(id);
             if (Selected == id) Selected = Uncategorized;
             Commit();
@@ -131,6 +159,7 @@ namespace LoMSaveManager
         public void MoveUp(string id)
         {
             RequireUser(id, "reordered");
+            RequireEditable();
             if (!CanMoveUp(id)) return;
             _catalog.MoveCategory(id, IndexOf(id) - 1);
             Commit();
@@ -139,6 +168,7 @@ namespace LoMSaveManager
         public void MoveDown(string id)
         {
             RequireUser(id, "reordered");
+            RequireEditable();
             if (!CanMoveDown(id)) return;
             _catalog.MoveCategory(id, IndexOf(id) + 1);
             Commit();
@@ -149,6 +179,7 @@ namespace LoMSaveManager
         {
             if (targetId == Recent || targetId == Auto)
                 throw new InvalidOperationException("Saves cannot be moved into " + targetId);
+            RequireEditable();
             _catalog.Assign(key, targetId == Uncategorized ? null : targetId);
             Commit();
         }
@@ -156,6 +187,7 @@ namespace LoMSaveManager
         /// <summary>Names a save; empty or whitespace clears the name.</summary>
         public void Name(string key, string name)
         {
+            RequireEditable();
             _catalog.SetName(key, name);
             Commit();
         }
@@ -163,6 +195,7 @@ namespace LoMSaveManager
         /// <summary>Flips the slot list between newest-first and oldest-first (stored in the index).</summary>
         public void ToggleSort()
         {
+            RequireEditable();
             _catalog.NewestFirst = !_catalog.NewestFirst;
             Commit();
         }
@@ -170,6 +203,11 @@ namespace LoMSaveManager
         private void RequireUser(string id, string what)
         {
             if (IsFixed(id)) throw new InvalidOperationException("The fixed category " + id + " cannot be " + what + ".");
+        }
+
+        private void RequireEditable()
+        {
+            if (!CanEdit) throw new ArgumentException(ReadOnlyErrorKey);
         }
 
         private bool Exists(string id)
@@ -189,6 +227,9 @@ namespace LoMSaveManager
         {
             _persist();
             Raise();
+            // Editable a moment ago (RequireEditable ran), so this very write made the session read-only (it was refused,
+            // for example for size): say so instead of letting the edit look saved. It stays visible only until restart.
+            if (!CanEdit) throw new ArgumentException(ReadOnlyErrorKey);
         }
 
         private void Raise()

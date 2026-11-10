@@ -12,7 +12,9 @@ namespace LoMSaveManager.Tests
     /// </summary>
     internal static class HardeningTests
     {
-        private const int OneMegabyte = 1024 * 1024;
+        private const int Cap = SaveIndexStore.MaxFileBytes;
+
+        private static readonly string CapText = JsonFile.Megabytes(SaveIndexStore.MaxFileBytes);
 
         public static void Run(Action<string, Action> test)
         {
@@ -53,14 +55,64 @@ namespace LoMSaveManager.Tests
                 var index = new SaveIndex();
                 index.Categories.Add(new CategoryRecord { Id = "a", Name = "  主線  " });
                 index.Categories.Add(new CategoryRecord { Id = "b", Name = new string('長', SaveCatalog.MaxCategoryNameLength + 30) });
-                index.Categories.Add(new CategoryRecord { Id = "c", Name = null });
                 // A surrogate pair straddling the limit is not cut in half.
                 index.Categories.Add(new CategoryRecord { Id = "d", Name = new string('x', SaveCatalog.MaxCategoryNameLength - 1) + "😀tail" });
                 index.Normalize();
                 Check.Equal("主線", index.Categories[0].Name);
                 Check.Equal(new string('長', SaveCatalog.MaxCategoryNameLength), index.Categories[1].Name);
-                Check.Equal("", index.Categories[2].Name);
-                Check.Equal(new string('x', SaveCatalog.MaxCategoryNameLength - 1), index.Categories[3].Name);
+                Check.Equal(new string('x', SaveCatalog.MaxCategoryNameLength - 1), index.Categories[2].Name);
+            });
+
+            test("normalize_drops_categories_without_a_name_and_uncategorizes_their_saves", () =>
+            {
+                var index = new SaveIndex();
+                index.Categories.Add(new CategoryRecord { Id = "a", Name = "主線", Order = 0 });
+                index.Categories.Add(new CategoryRecord { Id = "null", Name = null, Order = 1 });
+                index.Categories.Add(new CategoryRecord { Id = "empty", Name = "", Order = 2 });
+                index.Categories.Add(new CategoryRecord { Id = "blank", Name = " 　\t ", Order = 3 });
+                // A nameless entry does not shadow a named one with the same id that comes later.
+                index.Categories.Add(new CategoryRecord { Id = "b", Name = "  ", Order = 4 });
+                index.Categories.Add(new CategoryRecord { Id = "b", Name = "支線", Order = 5 });
+                index.Slots["001"] = new SlotRecord { Name = "n1", CategoryId = "a", Length = 1, Sha256 = TestStamps.ShaA };
+                index.Slots["002"] = new SlotRecord { Name = "n2", CategoryId = "null", Length = 1, Sha256 = TestStamps.ShaA };
+                index.Slots["003"] = new SlotRecord { Name = null, CategoryId = "blank", Length = 1, Sha256 = TestStamps.ShaA };
+                index.Slots["004"] = new SlotRecord { Name = "n4", CategoryId = "b", Length = 1, Sha256 = TestStamps.ShaA };
+                index.Normalize();
+
+                Check.Equal("a,b", string.Join(",", index.Categories.Select(c => c.Id)));
+                Check.Equal("支線", index.Categories[1].Name);
+                Check.Equal("a", index.Slots["001"].CategoryId);
+                Check.Null(index.Slots["002"].CategoryId);
+                Check.Equal("n2", index.Slots["002"].Name); // the save keeps its name
+                Check.Null(index.Slots["003"].CategoryId);
+                Check.Equal("b", index.Slots["004"].CategoryId);
+
+                var catalog = new SaveCatalog(index);
+                Check.Equal("主線,支線", string.Join(",", catalog.UserCategories().Select(c => c.Name)));
+                Check.Equal(2, catalog.UncategorizedCount(new[] { "001", "002", "003", "004" }));
+            });
+
+            test("a_name_ending_in_a_surrogate_pair_exactly_at_the_limit_is_kept_whole", () =>
+            {
+                var category = new string('x', SaveCatalog.MaxCategoryNameLength - 2) + "😀";
+                var slot = new string('名', SaveCatalog.MaxSlotNameLength - 2) + "😀";
+                Check.Equal(SaveCatalog.MaxCategoryNameLength, category.Length);
+                Check.Equal(SaveCatalog.MaxSlotNameLength, slot.Length);
+
+                var index = new SaveIndex();
+                index.Categories.Add(new CategoryRecord { Id = "a", Name = category });
+                index.Slots["001"] = new SlotRecord { Name = slot, CategoryId = "a", Length = 1, Sha256 = TestStamps.ShaA };
+                index.Normalize();
+                Check.Equal(category, index.Categories[0].Name);
+                Check.Equal(slot, index.Slots["001"].Name);
+
+                // The UI path accepts them too.
+                var catalog = new SaveCatalog(new SaveIndex());
+                catalog.Reconcile(new Dictionary<string, SaveStamp> { { "002", new SaveStamp(1, 1, TestStamps.ShaA) } });
+                var id = catalog.CreateCategory(category);
+                catalog.SetName("002", slot);
+                Check.Equal(category, catalog.UserCategories().Single(c => c.Id == id).Name);
+                Check.Equal(slot, catalog.NameOf("002"));
             });
 
             test("normalize_drops_slot_records_whose_key_is_not_a_manual_slot", () =>
@@ -136,7 +188,7 @@ namespace LoMSaveManager.Tests
                 session.ListKeys("a");
                 Check.True(bytes.SequenceEqual(File.ReadAllBytes(path)));
 
-                // The first real edit writes the normalized data, stored values exactly as the user sees them.
+                // The next write (here an edit) stores the normalized data, values exactly as the user sees them; what was dropped is gone.
                 session.Catalog.CreateCategory("Side");
                 Check.True(session.Persist());
                 var onDisk = new SaveIndexStore(path, SaveSession.LocalFolderFor(folder)).Load();
@@ -187,7 +239,7 @@ namespace LoMSaveManager.Tests
             test("store_reads_a_file_of_exactly_the_size_limit", () => TestStamps.WithFolder((folder, warnings) =>
             {
                 var path = SaveSession.IndexPathFor(folder);
-                File.WriteAllBytes(path, PaddedJson("{\"Version\":2,\"Categories\":[{\"Id\":\"a\",\"Name\":\"Main\",\"Order\":0}]}", OneMegabyte));
+                File.WriteAllBytes(path, PaddedJson("{\"Version\":2,\"Categories\":[{\"Id\":\"a\",\"Name\":\"Main\",\"Order\":0}]}", Cap));
                 var store = new SaveIndexStore(path, SaveSession.LocalFolderFor(folder));
                 var index = store.Load();
                 Check.Null(store.LastLoadProblem);
@@ -198,13 +250,13 @@ namespace LoMSaveManager.Tests
             test("store_leaves_an_oversized_synced_file_in_place_and_goes_read_only", () => TestStamps.WithFolder((folder, warnings) =>
             {
                 var path = SaveSession.IndexPathFor(folder);
-                var bytes = PaddedJson("{\"Version\":2,\"Categories\":[{\"Id\":\"a\",\"Name\":\"Main\",\"Order\":0}]}", OneMegabyte + 1);
+                var bytes = PaddedJson("{\"Version\":2,\"Categories\":[{\"Id\":\"a\",\"Name\":\"Main\",\"Order\":0}]}", Cap + 1);
                 File.WriteAllBytes(path, bytes);
                 var store = new SaveIndexStore(path, SaveSession.LocalFolderFor(folder));
                 var index = store.Load();
                 Check.Equal(0, index.Categories.Count);
                 Check.False(store.CanSave);
-                Check.True(store.LastLoadProblem != null && store.LastLoadProblem.Contains("1 MB"));
+                Check.True(store.LastLoadProblem != null && store.LastLoadProblem.Contains(CapText));
                 Check.True(bytes.SequenceEqual(File.ReadAllBytes(path)));
                 Check.False(Directory.Exists(SaveSession.LocalFolderFor(folder))
                     && Directory.GetFiles(SaveSession.LocalFolderFor(folder), "*corrupt*").Length > 0);
@@ -215,17 +267,119 @@ namespace LoMSaveManager.Tests
             {
                 TestStamps.PutSave(folder, "001", 10);
                 var path = SaveSession.IndexPathFor(folder);
-                var bytes = PaddedJson("{\"Version\":2}", OneMegabyte + 100);
+                var bytes = PaddedJson("{\"Version\":2}", Cap + 100);
                 File.WriteAllBytes(path, bytes);
 
                 var session = SaveSession.Open(folder, warnings.Add);
                 Check.False(session.CanPersist);
-                Check.True(warnings.Any(w => w.Contains("1 MB")));
+                Check.True(warnings.Any(w => w.Contains(CapText)));
                 session.Catalog.CreateCategory("Main");
                 Check.False(session.Persist());
                 session.ListKeys(null);
                 Check.True(bytes.SequenceEqual(File.ReadAllBytes(path)));
                 Check.SetEqual(new[] { "LoMSaveManager.json", "Save_001.dat" }, TestStamps.RootFileNames(folder));
+            }));
+
+            test("the_largest_index_this_mod_can_write_stays_well_under_the_read_cap", () =>
+            {
+                // Every manual slot named to the limit and filed, every category at its name limit, with the character
+                // the serializer spends the most bytes on: the mod can never write a file it would refuse to read.
+                var worst = 0;
+                foreach (var unit in new[] { "\u0001", "\"", "\\", "/", "中", "😀", "\u2028", "<", "\u007f" })
+                    worst = Math.Max(worst, JsonFile.Write(LargestIndex(unit)).Length);
+                if (worst > Cap / 4 * 3)
+                    throw new Exception("the largest index is " + worst + " bytes, too close to the " + Cap + "-byte read cap");
+            });
+
+            test("the_largest_local_cache_stays_under_its_read_cap", () =>
+            {
+                var file = new LocalCacheFile { Version = LocalStampCache.CurrentVersion, Entries = new Dictionary<string, LocalCacheEntry>() };
+                for (var n = 1; n <= SlotKey.MaxManualSlot; n++)
+                    file.Entries[SlotKey.Format(n)] = new LocalCacheEntry { Length = long.MinValue, WriteTicks = long.MinValue, Sha256 = TestStamps.ShaA };
+                var size = JsonFile.Write(file).Length;
+                if (size > LocalStampCache.MaxFileBytes / 4 * 3)
+                    throw new Exception("the largest cache is " + size + " bytes, too close to its " + LocalStampCache.MaxFileBytes + "-byte cap");
+            });
+
+            test("store_refuses_to_write_past_its_read_cap_and_keeps_the_previous_file", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                var path = SaveSession.IndexPathFor(folder);
+                var store = new SaveIndexStore(path, SaveSession.LocalFolderFor(folder), 2048);
+                var small = new SaveIndex();
+                small.Categories.Add(new CategoryRecord { Id = "a", Name = "Main" });
+                store.Save(small);
+                var before = File.ReadAllBytes(path);
+
+                var big = new SaveIndex();
+                for (var i = 0; i < 100; i++) big.Categories.Add(new CategoryRecord { Id = "c" + i, Name = "category " + i, Order = i });
+                Check.Throws<IOException>(() => store.Save(big));
+                Check.False(store.CanSave);
+                Check.True(before.SequenceEqual(File.ReadAllBytes(path)));
+                Check.Equal(0, Directory.GetFiles(folder, "*.tmp", SearchOption.AllDirectories).Length);
+                Check.Throws<InvalidOperationException>(() => store.Save(small)); // read-only for the rest of the session
+
+                // The next session reads the kept file normally.
+                var reread = new SaveIndexStore(path, SaveSession.LocalFolderFor(folder), 2048);
+                Check.Equal("Main", reread.Load().Categories.Single().Name);
+                Check.True(reread.CanSave);
+            }));
+
+            test("store_writes_a_file_of_exactly_its_read_cap", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                var path = SaveSession.IndexPathFor(folder);
+                var index = new SaveIndex();
+                index.Categories.Add(new CategoryRecord { Id = "a", Name = "Main" });
+                var exact = JsonFile.Write(index).Length;
+                var store = new SaveIndexStore(path, null, exact);
+                store.Save(index);
+                Check.True(store.CanSave);
+                Check.Equal((long)exact, new FileInfo(path).Length);
+            }));
+
+            test("session_whose_next_write_would_pass_the_cap_keeps_the_file_and_stops_editing", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                TestStamps.PutSave(folder, "001", 10);
+                var first = SaveSession.Open(folder, warnings.Add, 2048);
+                first.ListKeys(null);
+                first.Catalog.SetName("001", "kept");
+                Check.True(first.Persist());
+                var path = SaveSession.IndexPathFor(folder);
+                var before = File.ReadAllBytes(path);
+
+                var session = SaveSession.Open(folder, warnings.Add, 2048);
+                Check.True(session.CanPersist);
+                for (var i = 0; i < 100; i++) session.Catalog.CreateCategory("category " + i);
+                Check.False(session.Persist());
+                Check.False(session.CanPersist);
+                Check.Equal(1, warnings.Count(w => w.Contains("2048") || w.Contains("cap")));
+                Check.False(session.Persist()); // no second warning
+                Check.Equal(1, warnings.Count(w => w.Contains("2048") || w.Contains("cap")));
+                Check.True(before.SequenceEqual(File.ReadAllBytes(path)));
+                Check.Equal("kept", SaveSession.Open(folder, warnings.Add, 2048).Catalog.NameOf("001"));
+            }));
+
+            test("an_edit_whose_write_is_refused_for_size_reports_the_read_only_error", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                TestStamps.PutSave(folder, "001", 10);
+                var session = SaveSession.Open(folder, warnings.Add, 2048);
+                var controller = new CategoryController(session.Catalog, () => session.Persist(), () => session.CanPersist);
+                string refused = null;
+                var refusedWhileEditable = false;
+                for (var i = 0; i < 100 && refused == null; i++)
+                {
+                    var editable = controller.CanEdit;
+                    try { controller.Create("category " + i); }
+                    catch (ArgumentException ex)
+                    {
+                        refused = ex.Message;
+                        refusedWhileEditable = editable;
+                    }
+                }
+                // The very edit whose write hit the cap says so (a toast in the panel) instead of looking saved.
+                Check.Equal(CategoryController.ReadOnlyErrorKey, refused);
+                Check.True(refusedWhileEditable);
+                Check.False(controller.CanEdit);
+                Check.True(new FileInfo(SaveSession.IndexPathFor(folder)).Length <= 2048);
             }));
 
             test("oversized_local_cache_is_ignored_and_rebuilt", () => TestStamps.WithFolder((folder, warnings) =>
@@ -254,12 +408,12 @@ namespace LoMSaveManager.Tests
                 TestStamps.PutSave(folder, "001", 10);
                 Directory.CreateDirectory(SaveSession.LocalFolderFor(folder));
                 var legacy = SaveSession.LegacyIndexPathFor(folder);
-                var bytes = PaddedJson("{\"Version\":1}", OneMegabyte + 1);
+                var bytes = PaddedJson("{\"Version\":1}", Cap + 1);
                 File.WriteAllBytes(legacy, bytes);
 
                 var result = MetadataMigration.TryMigrate(folder);
                 Check.False(result.Migrated);
-                Check.True(result.Problem != null && result.Problem.Contains("1 MB"));
+                Check.True(result.Problem != null && result.Problem.Contains(CapText));
                 Check.True(bytes.SequenceEqual(File.ReadAllBytes(legacy)));
                 Check.Equal(0, Directory.GetFiles(SaveSession.LocalFolderFor(folder), "*corrupt*").Length);
 
@@ -271,10 +425,25 @@ namespace LoMSaveManager.Tests
                 Check.True(File.Exists(legacy));
             }));
 
+            test("oversized_v1_index_log_says_it_is_not_retried_and_what_to_do", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                Directory.CreateDirectory(SaveSession.LocalFolderFor(folder));
+                File.WriteAllBytes(SaveSession.LegacyIndexPathFor(folder), PaddedJson("{\"Version\":1}", Cap + 1));
+
+                var result = MetadataMigration.TryMigrate(folder);
+                Check.True(result.Problem.Contains("not retried automatically"));
+                Check.True(result.Problem.Contains("move " + SaveSession.FolderName + "/" + SaveSession.LegacyIndexFileName));
+
+                var session = SaveSession.Open(folder, warnings.Add);
+                session.Persist();
+                Check.True(warnings.Any(w => w.Contains("not retried automatically")));
+                Check.False(warnings.Any(w => w.Contains("retried at the next start")));
+            }));
+
             test("oversized_v1_index_beside_the_synced_file_is_reported_not_read", () => TestStamps.WithFolder((folder, warnings) =>
             {
                 Directory.CreateDirectory(SaveSession.LocalFolderFor(folder));
-                File.WriteAllBytes(SaveSession.LegacyIndexPathFor(folder), PaddedJson("{\"Version\":1}", OneMegabyte + 1));
+                File.WriteAllBytes(SaveSession.LegacyIndexPathFor(folder), PaddedJson("{\"Version\":1}", Cap + 1));
                 var seed = new SaveIndex();
                 seed.Categories.Add(new CategoryRecord { Id = "a", Name = "Main" });
                 new SaveIndexStore(SaveSession.IndexPathFor(folder)).Save(seed);
@@ -300,6 +469,31 @@ namespace LoMSaveManager.Tests
                 Check.Equal("", DisplayText.Plain(""));
                 Check.Null(DisplayText.Plain(null));
             });
+        }
+
+        /// <summary>
+        /// The biggest index the mod's own rules allow: every manual slot with a name at the limit (made of
+        /// <paramref name="unit"/>, one or two UTF-16 units), filed in a category, with the widest numbers; and every
+        /// category with a name at the limit. Ids are the mod's own 32-character GUIDs.
+        /// </summary>
+        private static SaveIndex LargestIndex(string unit)
+        {
+            var index = new SaveIndex { NewestFirst = false };
+            var categoryName = Repeat(unit, SaveCatalog.MaxCategoryNameLength);
+            for (var i = 0; i < SaveCatalog.MaxCategories; i++)
+                index.Categories.Add(new CategoryRecord { Id = Guid.NewGuid().ToString("N"), Name = categoryName, Order = int.MinValue });
+            var slotName = Repeat(unit, SaveCatalog.MaxSlotNameLength);
+            var categoryId = index.Categories[0].Id;
+            for (var n = 1; n <= SlotKey.MaxManualSlot; n++)
+                index.Slots[SlotKey.Format(n)] = new SlotRecord { Name = slotName, CategoryId = categoryId, Length = long.MinValue, Sha256 = TestStamps.ShaA };
+            return index;
+        }
+
+        private static string Repeat(string unit, int maxLength)
+        {
+            var text = new StringBuilder();
+            while (text.Length + unit.Length <= maxLength) text.Append(unit);
+            return text.ToString();
         }
 
         /// <summary>A JSON object padded with trailing spaces (still valid JSON) to exactly <paramref name="size"/> bytes.</summary>

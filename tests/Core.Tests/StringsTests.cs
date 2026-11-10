@@ -27,7 +27,7 @@ namespace LoMSaveManager.Tests
             "Name.Placeholder.Category", "Name.Hint.Save", "Name.Ok", "Name.Cancel", "Name.Skip",
             "Move.Title", "Move.Current",
             "Toast.Moved",
-            "Error.Disabled",
+            "Error.Disabled", "Error.ReadOnly",
         };
 
         // Keys removed from the UI copy. Name.Title.Category became Name.Title.CategoryNew / Name.Title.CategoryRename.
@@ -213,6 +213,7 @@ namespace LoMSaveManager.Tests
                 Expect("Move.Title", "移到哪個分類？", "移到哪个分类？");
                 Expect("Move.Current", "目前所在", "当前所在");
                 Expect("Toast.Moved", "已移到「{0}」", "已移到“{0}”");
+                Expect("Error.ReadOnly", "本次啟動無法儲存名稱與分類，暫不能修改；遊戲存檔不受影響。", "本次启动无法保存名称与分类，暂不能修改；游戏存档不受影响。");
             });
 
             test("unchanged_texts_keep_their_content", () =>

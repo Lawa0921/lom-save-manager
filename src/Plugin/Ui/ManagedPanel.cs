@@ -132,7 +132,7 @@ namespace LoMSaveManager
         {
             var runtime = SaveManagerRuntime.Current;
             Kit = UiKit.For(panel);
-            Controller = new CategoryController(runtime.Catalog, () => runtime.Persist());
+            Controller = new CategoryController(runtime.Catalog, () => runtime.Persist(), () => runtime.CanPersist);
             // The save panel has no recent/auto list; it opens on the played save's category (see PanelHooks).
             Controller.Select(IsLoad ? _lastLoadCategory : CategoryController.Uncategorized);
             Controller.Changed += OnControllerChanged;
@@ -675,6 +675,7 @@ namespace LoMSaveManager
         public void ToggleManage()
         {
             _dwell.Cancel();
+            if (!Managing && RefusedReadOnly()) return; // leaving manage mode is always allowed
             Managing = !Managing;
             SafeRefresh("Switching manage mode");
             var categories = Controller.Catalog.UserCategories();
@@ -715,6 +716,7 @@ namespace LoMSaveManager
 
         public void BeginCreateCategory()
         {
+            if (RefusedReadOnly()) return;
             _name.Show("category_new", "Name.Title.CategoryNew", null, "Name.Placeholder.Category", null, "",
                 SaveCatalog.MaxCategoryNameLength, "Name.Cancel", text =>
                 {
@@ -730,6 +732,7 @@ namespace LoMSaveManager
 
         public void BeginRenameCategory(string id)
         {
+            if (RefusedReadOnly()) return;
             var category = Controller.Catalog.UserCategories().FirstOrDefault(c => c.Id == id);
             if (category == null) return;
             _name.Show("category_rename", "Name.Title.CategoryRename", null, "Name.Placeholder.Category", null, category.Name,
@@ -743,11 +746,14 @@ namespace LoMSaveManager
 
         public void BeginDeleteCategory(string id)
         {
+            if (RefusedReadOnly()) return;
             var category = Controller.Catalog.UserCategories().FirstOrDefault(c => c.Id == id);
             if (category == null) return;
             _confirm.Show("category_delete", () => string.Format(S("Category.ConfirmDelete"), DisplayText.Plain(category.Name), category.Count), () =>
             {
-                Controller.Delete(id);
+                // Like every other action: a refusal (read-only, or the write was refused) is a toast, and the focus is
+                // still put back on a button whether or not the category went away.
+                Run(() => Controller.Delete(id));
                 var first = Controller.Catalog.UserCategories().FirstOrDefault();
                 if (first != null) SelectManageButton(first.Id, true);
                 else Select(_sidebar.ManageButton);
@@ -756,7 +762,7 @@ namespace LoMSaveManager
 
         public void ToggleSort()
         {
-            Run(() => Controller.ToggleSort());
+            if (!RefusedReadOnly()) Run(() => Controller.ToggleSort());
             Select(_sort);
         }
 
@@ -766,6 +772,7 @@ namespace LoMSaveManager
         public void BeginNameSave(string key, bool afterSave)
         {
             if (!_existing.Contains(key)) return;
+            if (RefusedReadOnly()) return; // after a save too: the save itself is done, only its name cannot be kept
             _name.Show(afterSave ? "save_name_after_save" : "save_name", "Name.Title.Save", Context(key, true), "Name.Placeholder.Save",
                 "Name.Hint.Save", Controller.Catalog.NameOf(key) ?? "", SaveCatalog.MaxSlotNameLength,
                 afterSave ? "Name.Skip" : "Name.Cancel", text =>
@@ -779,6 +786,7 @@ namespace LoMSaveManager
         public void BeginMoveSave(string key)
         {
             if (!_existing.Contains(key)) return;
+            if (RefusedReadOnly()) return;
             var oldIndex = IndexOfKey(key);
             var current = Controller.Catalog.CategoryOf(key) ?? CategoryController.Uncategorized;
             _move.Show(Context(key, false), current, Controller.Catalog.UserCategories(), target =>
@@ -855,6 +863,17 @@ namespace LoMSaveManager
             if (_toast != null) _toast.Show(message);
         }
 
+        /// <summary>
+        /// True (after a toast saying so) when names and categories cannot be saved this session: the edit is not
+        /// offered at all, so nothing appears that would vanish at the next start. The controller refuses it as well.
+        /// </summary>
+        private bool RefusedReadOnly()
+        {
+            if (Controller.CanEdit) return false;
+            ShowToast(S(CategoryController.ReadOnlyErrorKey));
+            return true;
+        }
+
         /// <summary>Runs a controller action; a validation error key is returned (null = done), other failures are logged.</summary>
         private string Attempt(Action action)
         {
@@ -898,6 +917,7 @@ namespace LoMSaveManager
                 { "pending_category", Controller.PendingCategoryId },
                 { "newest_first", Controller.NewestFirst },
                 { "managing", Managing },
+                { "can_edit", Controller.CanEdit },
                 { "keys", _keys.ToList() },
                 { "new_row_key", _newRowKey },
                 { "category_switch_pending", _dwell.Pending },

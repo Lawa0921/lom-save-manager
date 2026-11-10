@@ -8,8 +8,10 @@ namespace LoMSaveManager
     /// <summary>What <see cref="MetadataMigration.TryMigrate"/> did.</summary>
     public sealed class MigrationResult
     {
-        internal MigrationResult(bool migrated, int kept, int dropped, string problem, string note = null, bool wroteSyncedFile = true)
+        internal MigrationResult(bool migrated, int kept, int dropped, string problem, string note = null, bool wroteSyncedFile = true,
+            bool needsPlayer = false)
         {
+            NeedsPlayer = needsPlayer;
             Migrated = migrated;
             Kept = kept;
             Dropped = dropped;
@@ -17,6 +19,9 @@ namespace LoMSaveManager
             Note = note;
             WroteSyncedFile = migrated && wroteSyncedFile;
         }
+
+        /// <summary>True when the migration failed in a way the next start cannot fix by itself (the old file is too large to read).</summary>
+        public bool NeedsPlayer { get; }
 
         /// <summary>True when a completed migration wrote LoMSaveManager.json (false when the old index held nothing to carry over).</summary>
         public bool WroteSyncedFile { get; }
@@ -66,7 +71,8 @@ namespace LoMSaveManager
     /// Runs only when LoMSaveManager.json does not exist and index.json does. A record is carried over only if its
     /// file still has the recorded length and write ticks (the v1 rule); its content is hashed then.
     /// On any failure LoMSaveManager.json is not written, so the next start tries again (an index.json that can never be
-    /// parsed is renamed to index.json.corrupt-&lt;UTC ticks&gt; instead). After a successful write the old file is
+    /// parsed is renamed to index.json.corrupt-&lt;UTC ticks&gt; instead; one over the size cap is left in place, and the
+    /// log says that retrying cannot help and how to start fresh: <see cref="MigrationResult.NeedsPlayer"/>). After a successful write the old file is
     /// renamed to index.json.migrated-&lt;UTC ticks&gt;, never deleted. <see cref="SaveSession.Open"/> calls this itself.
     /// </summary>
     public static class MetadataMigration
@@ -104,8 +110,12 @@ namespace LoMSaveManager
             if (bytes == null)
             {
                 // Left in place like an unreadable file (the session stays read-only), not moved aside: it may be fine.
-                return Failed(SaveSession.LegacyIndexFileName + " is larger than " + JsonFile.Megabytes(SaveIndexStore.MaxFileBytes)
-                    + " and was not read; left untouched");
+                // Unlike a locked file this will fail the same way at every start, so say what the player can do.
+                var legacyName = SaveSession.FolderName + "/" + SaveSession.LegacyIndexFileName;
+                return new MigrationResult(false, 0, 0, "metadata migration not done: " + legacyName + " is larger than "
+                    + JsonFile.Megabytes(SaveIndexStore.MaxFileBytes) + " and was not read; left untouched. This is not retried automatically "
+                    + "(it fails the same way at every start), so names and categories stay read-only. To start fresh, close the game "
+                    + "and move " + legacyName + " out of the save folder (keep it if you want to report it).", null, true, true);
             }
 
             string problem;

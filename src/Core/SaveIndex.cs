@@ -66,18 +66,31 @@ namespace LoMSaveManager
 
         /// <summary>
         /// Makes loaded data obey the same rules the UI enforces, because the file may have been hand-edited, damaged, or
-        /// written elsewhere and synced: explicit nulls are dropped; categories without an id or with a repeated id are
-        /// dropped (the first wins); at most <see cref="SaveCatalog.MaxCategories"/> categories are kept (lowest Order
-        /// first); category names are trimmed and cut to <see cref="SaveCatalog.MaxCategoryNameLength"/>; slot records whose
-        /// key is not a manual slot are dropped; slot names are trimmed (blank means none) and cut to
+        /// written elsewhere and synced: explicit nulls are dropped; categories without an id or without a name (null or
+        /// blank, which the UI never allows) are dropped, and saves filed in a nameless one become uncategorized; of the
+        /// rest, a repeated id is dropped (the first wins); at most <see cref="SaveCatalog.MaxCategories"/> categories are
+        /// kept (lowest Order first); category names are trimmed and cut to <see cref="SaveCatalog.MaxCategoryNameLength"/>;
+        /// slot records whose key is not a manual slot are dropped; slot names are trimmed (blank means none) and cut to
         /// <see cref="SaveCatalog.MaxSlotNameLength"/>. Data that already obeys the rules is left exactly as it is.
-        /// This only changes the object in memory; it never writes the file.
+        /// This only changes the object in memory and never writes the file by itself; but the whole index is written
+        /// whenever anything is (an edit, a save through the game, a record that went stale), and from then on whatever
+        /// was dropped or cut here is gone from the file for good.
         /// </summary>
         internal void Normalize()
         {
             if (Categories == null) Categories = new List<CategoryRecord>();
+            // Nameless categories go before the duplicate check, so one cannot shadow a named entry with the same id.
+            var namelessIds = new HashSet<string>(StringComparer.Ordinal);
+            Categories.RemoveAll(c =>
+            {
+                if (c == null || string.IsNullOrEmpty(c.Id)) return true;
+                if (c.Name != null && c.Name.Trim().Length > 0) return false;
+                namelessIds.Add(c.Id);
+                return true;
+            });
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
-            Categories.RemoveAll(c => c == null || string.IsNullOrEmpty(c.Id) || !seenIds.Add(c.Id));
+            Categories.RemoveAll(c => !seenIds.Add(c.Id));
+            namelessIds.ExceptWith(seenIds);
             if (Categories.Count > SaveCatalog.MaxCategories)
             {
                 // OrderBy is stable, so equal Orders keep their list order, as the catalog shows them.
@@ -85,7 +98,7 @@ namespace LoMSaveManager
                 Categories.RemoveAll(c => !kept.Contains(c));
             }
             foreach (var category in Categories)
-                category.Name = Cut(category.Name == null ? string.Empty : category.Name.Trim(), SaveCatalog.MaxCategoryNameLength);
+                category.Name = Cut(category.Name.Trim(), SaveCatalog.MaxCategoryNameLength);
 
             if (Slots == null)
             {
@@ -101,6 +114,7 @@ namespace LoMSaveManager
                     dropped.Add(pair.Key);
                     continue;
                 }
+                if (pair.Value.CategoryId != null && namelessIds.Contains(pair.Value.CategoryId)) pair.Value.CategoryId = null;
                 var name = pair.Value.Name;
                 if (name == null) continue;
                 var clean = name.Trim();

@@ -132,6 +132,79 @@ namespace LoMSaveManager.Tests
                 Check.True(index.NewestFirst);
             });
 
+            test("controller_refuses_every_edit_while_it_cannot_save", () =>
+            {
+                var index = new SaveIndex();
+                var catalog = new SaveCatalog(index);
+                catalog.Reconcile(Files("001", "002"));
+                var canEdit = true;
+                var persisted = 0;
+                var controller = new CategoryController(catalog, () => persisted++, () => canEdit);
+                Check.True(controller.CanEdit);
+                var a = controller.Create("A");
+                var b = controller.Create("B");
+                controller.Name("001", "n");
+                controller.Move("001", a);
+
+                canEdit = false;
+                Check.False(controller.CanEdit);
+                persisted = 0;
+                var changed = 0;
+                controller.Changed += () => changed++;
+                var before = JsonFile.Write(index);
+                var edits = new Action[]
+                {
+                    () => controller.Create("C"),
+                    () => controller.Rename(a, "X"),
+                    () => controller.Delete(a),
+                    () => controller.MoveUp(b),
+                    () => controller.MoveDown(a),
+                    () => controller.Move("002", a),
+                    () => controller.Move("001", CategoryController.Uncategorized),
+                    () => controller.Name("001", "renamed"),
+                    () => controller.Name("002", "new"),
+                    () => controller.ToggleSort(),
+                };
+                foreach (var edit in edits) ThrowsKey(CategoryController.ReadOnlyErrorKey, edit);
+                Check.True(before.SequenceEqual(JsonFile.Write(index)));
+                Check.Equal(0, persisted);
+                Check.Equal(0, changed);
+
+                // Browsing still works, and the refusal has text to show.
+                controller.Select(a);
+                Check.Equal(a, controller.Selected);
+                Check.True(Strings.Keys.Contains(CategoryController.ReadOnlyErrorKey));
+
+                canEdit = true;
+                controller.Name("002", "ok");
+                Check.Equal("ok", catalog.NameOf("002"));
+            });
+
+            test("controller_without_a_can_edit_check_always_edits", () =>
+            {
+                var controller = new CategoryController(new SaveCatalog(new SaveIndex()), () => { });
+                Check.True(controller.CanEdit);
+                controller.Create("A");
+            });
+
+            test("controller_on_a_read_only_session_cannot_edit", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                TestStamps.PutSave(folder, "001", 10);
+                var path = SaveSession.IndexPathFor(folder);
+                File.WriteAllText(path, "{\"Version\":99}");
+                var session = SaveSession.Open(folder, warnings.Add);
+                var controller = new CategoryController(session.Catalog, () => session.Persist(), () => session.CanPersist);
+                session.ListKeys(null);
+                Check.False(controller.CanEdit);
+                ThrowsKey(CategoryController.ReadOnlyErrorKey, () => controller.Name("001", "lost on restart"));
+                Check.Null(session.Catalog.NameOf("001"));
+                Check.Equal("{\"Version\":99}", File.ReadAllText(path));
+
+                File.Delete(path);
+                var writable = SaveSession.Open(folder, warnings.Add);
+                Check.True(new CategoryController(writable.Catalog, () => writable.Persist(), () => writable.CanPersist).CanEdit);
+            }));
+
             test("session_list_keys_follows_the_sort_preference", () => WithFolder(folder =>
             {
                 Touch(folder, "Save_001.dat", 2020);

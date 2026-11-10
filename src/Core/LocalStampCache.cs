@@ -16,7 +16,9 @@ namespace LoMSaveManager
         public const int CurrentVersion = 1;
 
         /// <summary>
-        /// Larger caches are ignored (and rewritten). About 130 bytes per save, so even all 9999 slots fit well below this.
+        /// Larger caches are ignored (and rewritten). At most about 130 bytes per save (widest numbers), so all 9999 manual
+        /// slots stay near 1.3 MB, well below this: the cache the mod writes is always read back (a test keeps that worst
+        /// case under three quarters of the cap). Only Save_NNN.dat files are cached, so there are never more entries.
         /// </summary>
         public const int MaxFileBytes = 4 * 1024 * 1024;
 

@@ -11,7 +11,7 @@ namespace LoMSaveManager
     {
         public const string PluginGuid = "local.lom.savemanager";
         public const string PluginName = "LoM Save Manager";
-        public const string PluginVersion = "0.1.1";
+        public const string PluginVersion = "0.1.2";
 
         private static ManualLogSource _log;
 

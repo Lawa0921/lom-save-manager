@@ -81,6 +81,7 @@ namespace LoMSaveManager
 
             // Plugin state
             new[] { "Error.Disabled", "存檔管理功能無法使用，已改用原作介面。", "存档管理功能无法使用，已改用原作界面。" },
+            new[] { CategoryController.ReadOnlyErrorKey, "本次啟動無法儲存名稱與分類，暫不能修改；遊戲存檔不受影響。", "本次启动无法保存名称与分类，暂不能修改；游戏存档不受影响。" },
         };
 
         private static readonly Dictionary<string, string[]> Table = BuildTable();

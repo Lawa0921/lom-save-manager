@@ -67,6 +67,15 @@ namespace LoMSaveManager
             Session.Persist();
         }
 
+        /// <summary>
+        /// Whether names and categories can be saved this session (false when LoMSaveManager.json is from a newer version,
+        /// unreadable or too large, or a v1 migration is pending). The panels refuse edits while it is false.
+        /// </summary>
+        public bool CanPersist
+        {
+            get { return _session != null && _session.CanPersist; }
+        }
+
         /// <summary>The manual saves on disk (Save_NNN.dat only) with their stamps.</summary>
         public IDictionary<string, SaveStamp> ScanManualSaves()
         {

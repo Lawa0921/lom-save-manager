@@ -47,6 +47,140 @@ namespace LoMSaveManager.Tests
                 Check.Equal(0, warnings.Count);
             }));
 
+            test("startup_that_finds_every_named_save_stale_keeps_the_synced_file", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                var a = TestStamps.PutSave(folder, "001", 1000, seed: 1);
+                var b = TestStamps.PutSave(folder, "002", 1200, seed: 2);
+                var session = SaveSession.Open(folder, warnings.Add);
+                session.ListKeys(null);
+                var cat = session.Catalog.CreateCategory("主線");
+                session.Catalog.SetName("001", "告白前");
+                session.Catalog.Assign("002", cat);
+                Check.True(session.Persist());
+                var ticket = session.BeforeSave("003");
+                TestStamps.PutSave(folder, "003", 800, seed: 3);
+                session.AfterSave(ticket, null); // a stamp-only record: carries no user data
+                var path = SaveSession.IndexPathFor(folder);
+                var synced = File.ReadAllBytes(path);
+                Check.True(Store(folder).Load().Slots.ContainsKey("003"));
+
+                // Steam Cloud has delivered the json but not yet the saves: one .dat missing, one still the old content.
+                var aBytes = File.ReadAllBytes(a);
+                var bBytes = File.ReadAllBytes(b);
+                File.Delete(a);
+                TestStamps.PutSave(folder, "002", 1200, seed: 7);
+                File.Delete(Path.Combine(folder, "Save_003.dat"));
+
+                var early = SaveSession.Open(folder, warnings.Add);
+                // Held for the whole run: nothing the game does in it may write the file without those names.
+                Check.False(early.CanPersist);
+                Check.True(warnings.Any(w => w.Contains("left as it is") && w.Contains("restart")));
+                var controller = new CategoryController(early.Catalog, () => early.Persist(), () => early.CanPersist);
+                Check.False(controller.CanEdit);
+                Check.Throws<ArgumentException>(() => controller.Create("新分類"));
+                early.ListKeys(null);
+                early.ListKeys(cat);
+                Check.True(synced.SequenceEqual(File.ReadAllBytes(path)));
+
+                // A save through the game, a new game and a delete all work, and none of them writes the file.
+                var saving = early.BeforeSave("004");
+                TestStamps.PutSave(folder, "004", 900, seed: 4);
+                early.AfterSave(saving, cat);
+                Check.Null(early.Catalog.CategoryOf("004")); // not shown in a category that would vanish at restart
+                TestStamps.PutSave(folder, "005", 900, seed: 5);
+                early.AfterNewGame("005", cat);
+                Check.Null(early.Catalog.CategoryOf("005"));
+                File.Delete(Path.Combine(folder, "Save_004.dat"));
+                early.AfterDelete("004");
+                Check.True(synced.SequenceEqual(File.ReadAllBytes(path)));
+                Check.True(File.Exists(Path.Combine(folder, "Save_005.dat")));
+
+                // Once the saves arrive, the next start finds every name again and can write as usual.
+                File.WriteAllBytes(a, aBytes);
+                File.WriteAllBytes(b, bBytes);
+                var later = SaveSession.Open(folder, warnings.Add);
+                Check.True(later.CanPersist);
+                Check.Equal("告白前", later.Catalog.NameOf("001"));
+                Check.Equal(cat, later.Catalog.CategoryOf("002"));
+                Check.False(Store(folder).Load().Slots.ContainsKey("003")); // its .dat really is gone: a normal reconcile
+                Check.Equal("告白前", Store(folder).Load().Slots["001"].Name);
+                Check.False(File.Exists(HoldPath(folder))); // the hold count is reset
+            }));
+
+            test("holding_the_same_file_three_starts_in_a_row_then_accepts_the_removal", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                var path = NameOnlySaves(folder, "001", "002");
+                File.Delete(Path.Combine(folder, "Save_001.dat"));
+                File.Delete(Path.Combine(folder, "Save_002.dat"));
+                var synced = File.ReadAllBytes(path);
+
+                for (var start = 1; start <= 3; start++)
+                {
+                    Check.False(SaveSession.Open(folder, warnings.Add).CanPersist);
+                    Check.True(synced.SequenceEqual(File.ReadAllBytes(path)));
+                }
+
+                // The player really deleted them outside the game: the fourth start in a row accepts it.
+                var accepted = SaveSession.Open(folder, warnings.Add);
+                Check.True(accepted.CanPersist);
+                Check.True(warnings.Any(w => w.Contains("accepted")));
+                Check.Equal(0, Store(folder).Load().Slots.Count);
+                Check.False(File.Exists(HoldPath(folder)));
+                Check.True(SaveSession.Open(folder, warnings.Add).CanPersist);
+            }));
+
+            test("a_changed_file_or_a_cleared_hold_restarts_the_hold_count", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                var path = NameOnlySaves(folder, "001", "002");
+                var oneBytes = File.ReadAllBytes(Path.Combine(folder, "Save_001.dat"));
+                File.Delete(Path.Combine(folder, "Save_001.dat"));
+                File.Delete(Path.Combine(folder, "Save_002.dat"));
+
+                SaveSession.Open(folder, warnings.Add);
+                SaveSession.Open(folder, warnings.Add);
+                // Another PC uploaded a different file: counting starts over.
+                var index = Store(folder).Load();
+                index.NewestFirst = false;
+                Store(folder).Save(index);
+                for (var start = 1; start <= 3; start++) Check.False(SaveSession.Open(folder, warnings.Add).CanPersist);
+                Check.Equal(2, Store(folder).Load().Slots.Count);
+
+                // One save arrives: nothing is held any more (and the vanished one is dropped as usual), the count resets.
+                File.WriteAllBytes(Path.Combine(folder, "Save_001.dat"), oneBytes);
+                Check.True(SaveSession.Open(folder, warnings.Add).CanPersist);
+                Check.False(File.Exists(HoldPath(folder)));
+                Check.SetEqual(new[] { "001" }, Store(folder).Load().Slots.Keys);
+
+                File.Delete(Path.Combine(folder, "Save_001.dat"));
+                for (var start = 1; start <= 3; start++) Check.False(SaveSession.Open(folder, warnings.Add).CanPersist);
+                Check.Equal(1, Store(folder).Load().Slots.Count);
+            }));
+
+            test("startup_reconcile_still_writes_when_some_named_save_survives_or_none_was_named", () => TestStamps.WithFolder((folder, warnings) =>
+            {
+                TestStamps.PutSave(folder, "001", 1000, seed: 1);
+                var b = TestStamps.PutSave(folder, "002", 1200, seed: 2);
+                var session = SaveSession.Open(folder, warnings.Add);
+                session.ListKeys(null);
+                session.Catalog.SetName("001", "kept");
+                session.Catalog.SetName("002", "gone");
+                Check.True(session.Persist());
+
+                File.Delete(b);
+                SaveSession.Open(folder, warnings.Add);
+                Check.False(Store(folder).Load().Slots.ContainsKey("002"));
+                Check.Equal("kept", Store(folder).Load().Slots["001"].Name);
+
+                // Only stamp-only records left and all stale: nothing a user made is at stake, so it is written as usual.
+                var stampOnly = new SaveIndex();
+                stampOnly.Categories.Add(new CategoryRecord { Id = "c", Name = "空的" });
+                stampOnly.Slots["005"] = new SlotRecord { Length = 3, Sha256 = TestStamps.ShaA };
+                Store(folder).Save(stampOnly);
+                SaveSession.Open(folder, warnings.Add);
+                Check.False(Store(folder).Load().Slots.ContainsKey("005"));
+                Check.False(warnings.Any(w => w.Contains("left as it is")));
+            }));
+
             test("length_same_content_changed_drops_record", () => TestStamps.WithFolder((folder, warnings) =>
             {
                 var a = TestStamps.PutSave(folder, "001", 500, seed: 1);
@@ -249,6 +383,22 @@ namespace LoMSaveManager.Tests
                     Check.Null(new LocalStampCache(cachePath).LoadProblem);
                 }
             }));
+        }
+
+        private static string HoldPath(string folder)
+        {
+            return Path.Combine(SaveSession.LocalFolderFor(folder), SaveSession.HeldNamesFileName);
+        }
+
+        /// <summary>Puts a save per key, names each one through a session, and returns the synced file's path.</summary>
+        private static string NameOnlySaves(string folder, params string[] keys)
+        {
+            for (var i = 0; i < keys.Length; i++) TestStamps.PutSave(folder, keys[i], 500 + i, seed: i + 1);
+            var session = SaveSession.Open(folder, w => { });
+            session.ListKeys(null);
+            foreach (var key in keys) session.Catalog.SetName(key, "name " + key);
+            Check.True(session.Persist());
+            return SaveSession.IndexPathFor(folder);
         }
 
         private static SaveIndexStore Store(string folder)

@@ -10,27 +10,39 @@ namespace LoMSaveManager
     /// Reads and writes the metadata file. Load never throws for a bad file: it quarantines it
     /// (&lt;name&gt;.corrupt-&lt;UTC ticks&gt; in the work directory) and starts empty, so the game itself is never affected.
     /// A file from a newer version, or one larger than <see cref="MaxFileBytes"/>, is left exactly as it is and never overwritten
-    /// by this store (moving it aside would propagate a delete through Steam Cloud).
+    /// by this store (moving it aside would propagate a delete through Steam Cloud). The store never writes a file larger
+    /// than it would read back either, so the mod cannot lock itself out with data it wrote.
     /// The temp file of an atomic write also lives in the work directory, so the synced folder only ever holds the file itself.
     /// </summary>
     public sealed class SaveIndexStore
     {
         /// <summary>
-        /// Larger files are not read at all. A real index stays far below this (about 200 bytes per named save; Steam Cloud's
-        /// quota holds roughly a thousand saves), so a bigger file is damaged or hostile, and parsing it could stall the game.
+        /// Larger files are neither read nor written. The largest file the mod's own rules allow (all 9999 manual slots
+        /// named to the 40-character limit and filed, 200 categories with 24-character names, every character at its
+        /// costliest JSON escape) is about 4.2 MB, while a typical named save takes about 200 bytes; so a bigger file is
+        /// damaged or hostile, and parsing it could stall the game. A test keeps that worst case under three quarters of this.
         /// </summary>
-        public const int MaxFileBytes = 1024 * 1024;
+        public const int MaxFileBytes = 8 * 1024 * 1024;
 
         private readonly string _path;
         private readonly string _workDirectory;
         private readonly string _fileName;
+        private readonly int _maxFileBytes;
 
         /// <param name="path">Full path to the metadata file.</param>
         /// <param name="workDirectory">Where the temp file and quarantined copies go; null means the file's own directory.
         /// Must be on the same volume as <paramref name="path"/>.</param>
         public SaveIndexStore(string path, string workDirectory = null)
+            : this(path, workDirectory, MaxFileBytes)
+        {
+        }
+
+        /// <param name="maxFileBytes">The read cap (tests use a small one); the mod itself always uses <see cref="MaxFileBytes"/>.</param>
+        internal SaveIndexStore(string path, string workDirectory, int maxFileBytes)
         {
             if (string.IsNullOrEmpty(path)) throw new ArgumentException("path is required", nameof(path));
+            if (maxFileBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxFileBytes));
+            _maxFileBytes = maxFileBytes;
             _path = path;
             _fileName = Path.GetFileName(path);
             _workDirectory = string.IsNullOrEmpty(workDirectory) ? Path.GetDirectoryName(path) : workDirectory;
@@ -49,17 +61,24 @@ namespace LoMSaveManager
         /// <summary>True when the last <see cref="Load"/> left the file alone because a newer version of the mod wrote it.</summary>
         public bool LoadedNewerVersion { get; private set; }
 
+        /// <summary>
+        /// True after a <see cref="Save"/> was refused because the file would have been larger than this store reads back.
+        /// The previous file is kept and <see cref="CanSave"/> stays false until the next <see cref="Load"/>.
+        /// </summary>
+        public bool RefusedOversizedWrite { get; private set; }
+
         public SaveIndex Load()
         {
             LastLoadProblem = null;
             CanSave = true;
             LoadedNewerVersion = false;
+            RefusedOversizedWrite = false;
 
             byte[] bytes;
             try
             {
                 if (!File.Exists(_path)) return new SaveIndex();
-                bytes = JsonFile.ReadAllBytesUpTo(_path, MaxFileBytes);
+                bytes = JsonFile.ReadAllBytesUpTo(_path, _maxFileBytes);
             }
             catch (FileNotFoundException) { return new SaveIndex(); }
             catch (DirectoryNotFoundException) { return new SaveIndex(); }
@@ -74,7 +93,7 @@ namespace LoMSaveManager
             if (bytes == null)
             {
                 // Not quarantined: moving the synced file would delete it from Steam Cloud and every other machine.
-                LastLoadProblem = _fileName + " is larger than " + JsonFile.Megabytes(MaxFileBytes) + " and was not read; left untouched, "
+                LastLoadProblem = _fileName + " is larger than " + JsonFile.Megabytes(_maxFileBytes) + " and was not read; left untouched, "
                     + "names and categories are not shown or saved this session (check the file, or move it away to start fresh)";
                 CanSave = false;
                 return new SaveIndex();
@@ -104,7 +123,9 @@ namespace LoMSaveManager
         /// <summary>
         /// Writes the file atomically (temp file in the work directory, then replace). Does nothing when the file already
         /// holds exactly these bytes, so an unchanged index is not re-uploaded by Steam Cloud.
-        /// Throws <see cref="InvalidOperationException"/> while <see cref="CanSave"/> is false.
+        /// Throws <see cref="InvalidOperationException"/> while <see cref="CanSave"/> is false. Content larger than the read cap
+        /// is not written at all: the previous file stays, <see cref="CanSave"/> becomes false and
+        /// <see cref="IndexTooLargeException"/> (an <see cref="IOException"/>) says why.
         /// </summary>
         public void Save(SaveIndex index)
         {
@@ -114,6 +135,15 @@ namespace LoMSaveManager
 
             index.Version = SaveIndex.CurrentVersion;
             var bytes = JsonFile.Write(index);
+
+            if (bytes.Length > _maxFileBytes)
+            {
+                // Written, it could never be read back: every later start would be read-only. Keep the last good file.
+                CanSave = false;
+                RefusedOversizedWrite = true;
+                throw new IndexTooLargeException(_fileName + " would be " + bytes.Length + " bytes, more than the "
+                    + JsonFile.Megabytes(_maxFileBytes) + " (" + _maxFileBytes + " bytes) this mod reads back; it was not written and the previous file is kept");
+            }
 
             if (SameAsOnDisk(bytes)) return;
 
@@ -208,6 +238,14 @@ namespace LoMSaveManager
                 note = "; could not be moved aside (" + ex.Message + ")";
                 return false;
             }
+        }
+    }
+
+    /// <summary>Thrown by <see cref="SaveIndexStore.Save"/> instead of writing a file larger than the store would read back.</summary>
+    public sealed class IndexTooLargeException : IOException
+    {
+        public IndexTooLargeException(string message) : base(message)
+        {
         }
     }
 

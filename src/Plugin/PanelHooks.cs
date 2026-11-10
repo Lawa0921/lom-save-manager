@@ -166,18 +166,28 @@ namespace LoMSaveManager
         /// <summary>After OnPanelOpen: the cursor goes to the right column's first row (the game picked the recent row).</summary>
         private static Exception LoadOnPanelOpenEnd(LoadGamePanel __instance, Exception __exception)
         {
-            var deferred = Deferred.Remove(__instance);
-            if (__exception != null || !deferred) return __exception;
+            var original = __exception;
             try
             {
-                var ui = __instance.GetComponent<ManagedPanel>();
-                if (ui != null) ui.SelectInitial();
+                var deferred = Deferred.Remove(__instance);
+                if (__exception != null || !deferred) return __exception;
+                try
+                {
+                    var ui = __instance.GetComponent<ManagedPanel>();
+                    if (ui != null) ui.SelectInitial();
+                }
+                catch (Exception ex)
+                {
+                    SaveManagerPlugin.LogWarn("Selecting the first row failed: " + ex.Message);
+                }
+                return null;
             }
             catch (Exception ex)
             {
-                SaveManagerPlugin.LogWarn("Selecting the first row failed: " + ex.Message);
+                // A finalizer must never replace the game's own outcome with an exception of ours.
+                SaveManagerPlugin.LogWarn("Finishing the load panel failed (" + ex.GetType().Name + ": " + ex.Message + ")");
+                return original;
             }
-            return null;
         }
 
         /// <summary>Notes which row is being deleted (to select its neighbour afterwards) and defers the game's refresh.</summary>

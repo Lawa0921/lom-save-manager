@@ -25,6 +25,12 @@ namespace LoMSaveManager
 
         public const string LocalCacheFileName = "local-cache.json";
 
+        /// <summary>
+        /// Per-machine record (in <see cref="FolderName"/>, not synced) of a held startup: the hash of the
+        /// LoMSaveManager.json that was held and how many starts in a row held it.
+        /// </summary>
+        public const string HeldNamesFileName = "held-names.json";
+
         private readonly SaveIndexStore _store;
         private readonly SaveIndex _index;
         private readonly LocalStampCache _cache;
@@ -33,6 +39,13 @@ namespace LoMSaveManager
         private bool _writeFailureReported;
         private bool _cacheFailureReported;
         private bool _migrationPending;
+        private bool _heldStaleNames;
+
+        /// <summary>
+        /// How many starts in a row may hold the same LoMSaveManager.json (every named save missing or changed) before
+        /// the next one accepts that the player really removed them.
+        /// </summary>
+        internal const int HeldStartsBeforeAccepting = 3;
 
         // Own writes whose after-save scan failed: settled by the next successful scan instead of being judged as replaced files.
         private readonly Dictionary<string, KeyValuePair<OwnWriteTicket, string>> _pendingWrites =
@@ -52,10 +65,15 @@ namespace LoMSaveManager
 
         public SaveCatalog Catalog { get; }
 
-        /// <summary>False when LoMSaveManager.json exists but could not be read at startup (or is from a newer version): it is then never written this session.</summary>
+        /// <summary>
+        /// False when LoMSaveManager.json exists but could not be read at startup (or is from a newer version, or a v1
+        /// migration is pending), or after a write was refused for being larger than the read cap: it is then never
+        /// written again this session, so the UI must not offer edits. Also false for a whole run that started with every
+        /// named or filed save missing or changed (see <see cref="Open"/>).
+        /// </summary>
         public bool CanPersist
         {
-            get { return _store.CanSave && !_migrationPending; }
+            get { return _store.CanSave && !_migrationPending && !_heldStaleNames; }
         }
 
         /// <summary>What the v1 -> v2 migration run by <see cref="Open"/> did (for the log).</summary>
@@ -95,10 +113,20 @@ namespace LoMSaveManager
         /// if that changed anything (a missing file is not created while the index is empty). First runs <see cref="MetadataMigration.TryMigrate"/>; if a v1 index.json is still
         /// waiting to be migrated after that (it failed, for example a save was locked), the session is read-only
         /// (<see cref="CanPersist"/> false) and creates no LoMSaveManager.json, so the old names are not stranded and
-        /// an empty file is never uploaded to Steam Cloud; the next start tries again.
+        /// an empty file is never uploaded to Steam Cloud; the next start tries again. When this startup check would drop
+        /// every record that holds a name or a category (typically Steam Cloud delivered the file before the saves), it is
+        /// not written back and the whole run is held (<see cref="CanPersist"/> false until the game is restarted): the records
+        /// are dropped in memory only and nothing writes the file this run. After <see cref="HeldStartsBeforeAccepting"/>
+        /// such starts in a row with the same file, the next start accepts the removal and writes as usual.
         /// </summary>
         /// <param name="warn">Receives problems worth a log line; it must not throw.</param>
         public static SaveSession Open(string userFolder, Action<string> warn)
+        {
+            return Open(userFolder, warn, SaveIndexStore.MaxFileBytes);
+        }
+
+        /// <param name="maxIndexBytes">The read (and write) cap of LoMSaveManager.json; tests use a small one.</param>
+        internal static SaveSession Open(string userFolder, Action<string> warn, int maxIndexBytes)
         {
             if (warn == null) throw new ArgumentNullException(nameof(warn));
             var migration = MetadataMigration.TryMigrate(userFolder);
@@ -108,7 +136,7 @@ namespace LoMSaveManager
             var migrationPending = !migration.Migrated
                 && !File.Exists(IndexPathFor(userFolder)) && File.Exists(LegacyIndexPathFor(userFolder));
 
-            var store = new SaveIndexStore(IndexPathFor(userFolder), LocalFolderFor(userFolder));
+            var store = new SaveIndexStore(IndexPathFor(userFolder), LocalFolderFor(userFolder), maxIndexBytes);
             var index = store.Load();
             if (store.LastLoadProblem != null) warn(store.LastLoadProblem);
             var cache = new LocalStampCache(LocalCachePathFor(userFolder));
@@ -118,6 +146,7 @@ namespace LoMSaveManager
             session.Migration = migration;
             session._migrationPending = migrationPending;
             var changed = false;
+            var withUserData = session.KeysWithUserData();
             try
             {
                 changed = session.Catalog.Reconcile(session.ScanManualSaves());
@@ -127,9 +156,12 @@ namespace LoMSaveManager
                 // Better to keep every record than to judge them against half a listing; the next save reconciles again.
                 warn("could not list the save folder: " + ex.Message);
             }
+            var allStale = changed && withUserData.Count > 0 && !withUserData.Overlaps(session._index.Slots.Keys);
+            if (session.CanPersist) changed = session.SettleHold(allStale, withUserData.Count) && changed;
             // Write only when a record really went stale. Loading alone (the limits applied by SaveIndex.Normalize, or a
-            // file formatted differently) must not rewrite the synced file: the first real edit does. Persist still runs
-            // on a read-only session, to say once why nothing will be saved.
+            // file formatted differently) must not rewrite the synced file. The next write of any kind (an edit, a save
+            // through the game, a stale record) writes the whole normalized index, and what Normalize dropped or cut is
+            // then gone from the file for good. Persist still runs on a read-only session, to say once why nothing will be saved.
             if (changed || !session.CanPersist) session.Persist();
             return session;
         }
@@ -157,6 +189,13 @@ namespace LoMSaveManager
                 _writeFailureReported = false;
                 return true;
             }
+            catch (IndexTooLargeException ex)
+            {
+                // The store is read-only from now on; this is the one line that says why.
+                _unwritableReported = true;
+                _warn(ex.Message + "; names and categories will not be saved for the rest of this session.");
+                return false;
+            }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 if (!_writeFailureReported)
@@ -168,11 +207,98 @@ namespace LoMSaveManager
             }
         }
 
+        /// <summary>
+        /// Decides a startup whose reconcile would drop every named or filed record (<paramref name="allStale"/>): most
+        /// likely Steam Cloud delivered LoMSaveManager.json before the saves. Such a run is held: nothing is written for its
+        /// whole length (any write would upload the file without those names), the records are dropped in memory only,
+        /// and the per-machine <see cref="HeldNamesFileName"/> counts the starts in a row that held the same file. After
+        /// <see cref="HeldStartsBeforeAccepting"/> of them the next start accepts the removal (the player really deleted
+        /// those saves). A start that holds nothing, or a different file, starts the count over. Returns whether the
+        /// reconcile may be written.
+        /// </summary>
+        private bool SettleHold(bool allStale, int named)
+        {
+            var holdPath = Path.Combine(LocalFolderFor(UserFolder), HeldNamesFileName);
+            if (!allStale)
+            {
+                TryDeleteHold(holdPath);
+                return true;
+            }
+
+            string hash;
+            try { hash = ContentHash.Sha256Hex(IndexPathFor(UserFolder)); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { hash = null; }
+
+            var record = ReadHold(holdPath);
+            var count = record != null && hash != null && record.Sha256 == hash ? record.Count + 1 : 1;
+            if (count > HeldStartsBeforeAccepting)
+            {
+                TryDeleteHold(holdPath);
+                _warn("every named or filed save (" + named + ") has been missing or changed on disk for " + HeldStartsBeforeAccepting
+                    + " starts in a row with the same " + IndexFileName + "; the removal is accepted and the file is updated.");
+                return true;
+            }
+
+            _heldStaleNames = true;
+            try
+            {
+                Directory.CreateDirectory(LocalFolderFor(UserFolder));
+                File.WriteAllBytes(holdPath, JsonFile.Write(new HeldNamesRecord { Version = 1, Sha256 = hash, Count = count }));
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                _warn("could not write " + HeldNamesFileName + ": " + ex.Message);
+            }
+            return false;
+        }
+
+        private static HeldNamesRecord ReadHold(string holdPath)
+        {
+            try
+            {
+                if (!File.Exists(holdPath)) return null;
+                var bytes = JsonFile.ReadAllBytesUpTo(holdPath, 64 * 1024);
+                if (bytes == null) return null;
+                string problem;
+                var record = JsonFile.TryRead<HeldNamesRecord>(bytes, HeldNamesFileName, out problem);
+                return record != null && record.Version == 1 && record.Count > 0 ? record : null;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        private static void TryDeleteHold(string holdPath)
+        {
+            try { if (File.Exists(holdPath)) File.Delete(holdPath); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+        }
+
+        /// <summary>Slot keys whose record holds something the user made: a name or a category.</summary>
+        private HashSet<string> KeysWithUserData()
+        {
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var pair in _index.Slots)
+                if (!string.IsNullOrEmpty(pair.Value.Name) || pair.Value.CategoryId != null) keys.Add(pair.Key);
+            return keys;
+        }
+
         private string ReadOnlyReason()
         {
+            if (_migrationPending && Migration != null && Migration.NeedsPlayer)
+                return "the names and categories of the previous version (" + FolderName + "/" + LegacyIndexFileName
+                    + ") could not be migrated and this is not retried automatically (see the warning above), so " + IndexFileName + " is not created";
             if (_migrationPending)
                 return "the names and categories of the previous version (" + FolderName + "/" + LegacyIndexFileName
                     + ") are not migrated yet, so " + IndexFileName + " is not created (the migration is retried at the next start)";
+            if (_heldStaleNames)
+                return "every named or filed save is missing or changed on disk (Steam Cloud may still be downloading them), so "
+                    + IndexFileName + " is left as it is for this whole run and their names are not shown; restart the game once "
+                    + "the saves have finished syncing (if they were really deleted, the removal is accepted after "
+                    + HeldStartsBeforeAccepting + " such starts in a row)";
+            if (_store.RefusedOversizedWrite)
+                return IndexFileName + " would have grown past the size this mod can read back, so the last good file is kept";
             if (_store.LoadedNewerVersion)
                 return IndexFileName + " was written by a newer version of this mod and is left untouched";
             return IndexFileName + " was left untouched because it could not be read at startup";
@@ -189,7 +315,7 @@ namespace LoMSaveManager
             if (_pendingWrites.Count > 0)
             {
                 foreach (var pending in _pendingWrites.Values)
-                    Catalog.CompleteOwnWrite(pending.Key, scan, pending.Value);
+                    Catalog.CompleteOwnWrite(pending.Key, scan, CanPersist ? pending.Value : null);
                 _pendingWrites.Clear();
                 Persist();
             }
@@ -246,7 +372,8 @@ namespace LoMSaveManager
                     + "); its name and category are kept and recorded at the next scan");
                 return;
             }
-            Catalog.CompleteOwnWrite(ticket, scan, categoryIdIfNew);
+            // While nothing can be saved, a category shown now would vanish at the next start: file it nowhere.
+            Catalog.CompleteOwnWrite(ticket, scan, CanPersist ? categoryIdIfNew : null);
             Persist();
         }
 
@@ -277,7 +404,7 @@ namespace LoMSaveManager
             Catalog.Reconcile(scan);
             Catalog.Forget(slot);
             SaveStamp stamp;
-            if (scan.TryGetValue(slot, out stamp)) Catalog.RecordOwnWrite(slot, stamp, categoryId);
+            if (scan.TryGetValue(slot, out stamp)) Catalog.RecordOwnWrite(slot, stamp, CanPersist ? categoryId : null);
             Persist();
         }
 
@@ -290,5 +417,16 @@ namespace LoMSaveManager
             if (!SlotKey.IsManual(slot)) return;
             if (Catalog.Reconcile(ScanManualSaves())) Persist();
         }
+    }
+
+    /// <summary>The per-machine <see cref="SaveSession.HeldNamesFileName"/>: which synced file was held, and how many starts in a row.</summary>
+    [System.Runtime.Serialization.DataContract]
+    internal sealed class HeldNamesRecord
+    {
+        [System.Runtime.Serialization.DataMember] public int Version { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public string Sha256 { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public int Count { get; set; }
     }
 }
