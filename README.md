@@ -2,7 +2,7 @@
 
 讓《活俠傳》存檔不再只有 20 格，可命名、可自訂分類（像資料夾）。僅限 Windows Steam 版，需 BepInEx 6。
 
-**[下載最新版](https://github.com/Lawa0921/lom-save-manager/releases/latest) · [安裝教學](#安裝方式) · [Discord](https://discord.gg/QRyTagwSSF)**
+**[下載最新版](https://github.com/Lawa0921/lom-save-manager/releases/latest) · [安裝教學](#安裝方式) · [圖文介紹](https://www.supergalen.com/journal/2026-11-10-legend-of-mortal-save-manager-mod/) · [Discord](https://discord.gg/QRyTagwSSF)**
 
 ![讀檔面板：左邊是分類，右邊是該分類的存檔](https://raw.githubusercontent.com/Lawa0921/lom-save-manager/main/docs/images/categories.jpg)
 
