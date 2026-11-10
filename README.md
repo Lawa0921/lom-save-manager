@@ -69,6 +69,23 @@
 - **[Discord](https://discord.gg/QRyTagwSSF)** 或 **[Threads](https://www.threads.com/@supergalen0921)**（我比較常在這兩個地方出沒），也可以開 [GitHub Issues](https://github.com/Lawa0921/lom-save-manager/issues)。
 - 請附上整個 `BepInEx\LogOutput.log`（裡面的路徑可能有你的 Windows 使用者名稱，貼出前自己看一下）、插件版本，以及你做了什麼、發生了什麼。
 
+## 發佈頁面
+
+這個 mod 在各平台的介紹頁，更新版本時一併更新：
+
+| 平台 | 連結 |
+|---|---|
+| 圖文介紹（SuperGalen） | https://www.supergalen.com/journal/2026-11-10-legend-of-mortal-save-manager-mod/ |
+| 實機影片（YouTube） | https://youtu.be/z4UaRiL2nas |
+| 巴哈姆特 活俠傳哈啦板・遊戲模組 | https://forum.gamer.com.tw/C.php?bsn=73317&snA=4563 |
+| Steam 指南 | https://steamcommunity.com/sharedfiles/filedetails/?id=3837176360 |
+| Nexus Mods | https://www.nexusmods.com/legendofmortal/mods/12 |
+| Threads | https://www.threads.com/@supergalen0921/post/DfjNHO5EzdA |
+| Instagram | https://www.instagram.com/p/DfjNtGOkgPc/ |
+| Facebook 粉絲專頁（營主蓋倫） | https://www.facebook.com/permalink.php?story_fbid=pfbid02W5JmvM2XCBWQYyySWTzUd13pbwQaSaFpN4ST5XRXGpuBytuMDqpTEeFGTN5uDFryl&id=61558667306294 |
+| Facebook 社團「活俠傳（非官方）」 | https://www.facebook.com/groups/1161990178187073/posts/1806990020353749 |
+| 社群（回報、交流） | [Discord](https://discord.gg/QRyTagwSSF) · [Threads @supergalen0921](https://www.threads.com/@supergalen0921) |
+
 ## 授權
 
 [MIT 授權](LICENSE)，Copyright (c) 2026 SuperGalen0921。玩家自製的非官方 mod，與 Obb Studio 無關。發佈包只有插件 DLL、README 和授權文字，不含遊戲檔案或 BepInEx（BepInEx 採 LGPL-2.1）。
